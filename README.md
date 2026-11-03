@@ -13,7 +13,7 @@ On top of it, the SDK adds what an agent needs before it can safely act on event
 - versioned rules;
 - conversation threads that keep their context.
 
-[![Watch the 6-minute film: the problem, the design, and two real use cases](docs/media/film-poster.png)](docs/media/event-agent-mcp-sdk.mp4)
+https://github.com/user-attachments/assets/ee4509e3-3e2f-4333-b010-f29fa6675317
 
 *Watch the 6-minute overview ([MP4, 12 MB](docs/media/event-agent-mcp-sdk.mp4)): the problem, the SDK design, and two use cases.*
 
