@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 1376" width="1180" height="1376" role="img" aria-labelledby="t d">
+<title id="t">How the Event Agent MCP SDK works</title>
+<desc id="d">An event takes three hops: from an upstream system to the MCP server, from the server to the MCP client host over MCP events, and from the host to the model only if it passes the gates. Side effects are proposed, approved by a human, and run once on the server.</desc>
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#7C93FF"/></marker>
+<marker id="ahs" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#34E3A8"/></marker>
+<marker id="aha" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#FFB547"/></marker>
+<radialGradient id="glow" cx="25%" cy="10%" r="90%"><stop offset="0" stop-color="#1A2550"/><stop offset="1" stop-color="#0A1124"/></radialGradient>
+</defs>
+<rect width="1180" height="1376" rx="28" fill="url(#glow)"/>
+<text x="40" y="72" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="38" font-weight="750" fill="#EEF2FF" text-anchor="start">How it works</text>
+<text x="40" y="112" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="21" font-weight="400" fill="#A6B1CF" text-anchor="start">An event takes three hops. Code decides what reaches the model; people approve what changes.</text>
+<rect x="40" y="160" width="1040" height="100" rx="20" fill="#111A33" stroke="rgba(255,255,255,0.16)" stroke-width="2"/>
+<text x="72" y="206" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#EEF2FF" text-anchor="start">Upstream system</text>
+<text x="72" y="238" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" font-weight="400" fill="#A6B1CF" text-anchor="start">monitoring alarms · lab instruments · paper feeds · any webhook source</text>
+<path d="M560.0 264 V342" stroke="#7C93FF" stroke-width="3.5" marker-end="url(#ah)"/>
+<circle cx="500.0" cy="303" r="19" fill="#7C93FF"/>
+<text x="500.0" y="311" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="21" font-weight="800" fill="#0A1124" text-anchor="middle">1</text>
+<text x="586.0" y="300" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20" font-weight="650" fill="#EEF2FF" text-anchor="start">signed webhook</text>
+<text x="586.0" y="326" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#A6B1CF" text-anchor="start">Standard Webhooks HMAC · loopback receiver</text>
+<rect x="40" y="346" width="1040" height="324" rx="26" fill="#111A33" stroke="#7C93FF" stroke-width="2.5"/>
+<text x="72" y="396" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="27" font-weight="750" fill="#EEF2FF" text-anchor="start">MCP server</text>
+<text x="1048" y="396" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" font-weight="600" fill="#7C93FF" text-anchor="end">@agentevents/server</text>
+<rect x="72.0" y="432" width="480.0" height="92" rx="16" fill="#17223F" stroke="rgba(255,255,255,0.10)" stroke-width="1.5"/>
+<rect x="72.0" y="448" width="6" height="60" rx="3" fill="#7C93FF"/>
+<circle cx="112.0" cy="478.0" r="16" fill="none" stroke="#7C93FF" stroke-width="2"/>
+<text x="112.0" y="485.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="750" fill="#7C93FF" text-anchor="middle">1</text>
+<text x="144.0" y="472" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="680" fill="#EEF2FF" text-anchor="start">Verify and dedup</text>
+<text x="144.0" y="502" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#A6B1CF" text-anchor="start">signature check · L1/L2 dedup</text>
+<rect x="568.0" y="432" width="480.0" height="92" rx="16" fill="#17223F" stroke="rgba(255,255,255,0.10)" stroke-width="1.5"/>
+<rect x="568.0" y="448" width="6" height="60" rx="3" fill="#7C93FF"/>
+<circle cx="608.0" cy="478.0" r="16" fill="none" stroke="#7C93FF" stroke-width="2"/>
+<text x="608.0" y="485.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="750" fill="#7C93FF" text-anchor="middle">2</text>
+<text x="640.0" y="472" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="680" fill="#EEF2FF" text-anchor="start">Map to an event envelope</text>
+<text x="640.0" y="502" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#A6B1CF" text-anchor="start">JSONata · tenant from the route</text>
+<rect x="72.0" y="540" width="480.0" height="92" rx="16" fill="#17223F" stroke="rgba(255,255,255,0.10)" stroke-width="1.5"/>
+<rect x="72.0" y="556" width="6" height="60" rx="3" fill="#7C93FF"/>
+<circle cx="112.0" cy="586.0" r="16" fill="none" stroke="#7C93FF" stroke-width="2"/>
+<text x="112.0" y="593.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="750" fill="#7C93FF" text-anchor="middle">3</text>
+<text x="144.0" y="580" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="680" fill="#EEF2FF" text-anchor="start">Validate, redact, log</text>
+<text x="144.0" y="610" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#A6B1CF" text-anchor="start">schema gate · redact before storing</text>
+<rect x="568.0" y="540" width="480.0" height="92" rx="16" fill="#17223F" stroke="rgba(255,255,255,0.10)" stroke-width="1.5"/>
+<rect x="568.0" y="556" width="6" height="60" rx="3" fill="#7C93FF"/>
+<circle cx="608.0" cy="586.0" r="16" fill="none" stroke="#7C93FF" stroke-width="2"/>
+<text x="608.0" y="593.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="750" fill="#7C93FF" text-anchor="middle">4</text>
+<text x="640.0" y="580" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="680" fill="#EEF2FF" text-anchor="start">Group into situations</text>
+<text x="640.0" y="610" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#A6B1CF" text-anchor="start">open/update/resolve · flapping · storm</text>
+<path d="M560.0 674 V752" stroke="#7C93FF" stroke-width="3.5" marker-end="url(#ah)"/>
+<circle cx="500.0" cy="713" r="19" fill="#7C93FF"/>
+<text x="500.0" y="721" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="21" font-weight="800" fill="#0A1124" text-anchor="middle">2</text>
+<text x="586.0" y="710" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20" font-weight="650" fill="#EEF2FF" text-anchor="start">MCP events</text>
+<text x="586.0" y="736" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#A6B1CF" text-anchor="start">events/list · poll · stream · subscribe (webhook)</text>
+<rect x="40" y="756" width="1040" height="324" rx="26" fill="#111A33" stroke="#34E3A8" stroke-width="2.5"/>
+<text x="72" y="806" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="27" font-weight="750" fill="#EEF2FF" text-anchor="start">MCP client (host)</text>
+<text x="1048" y="806" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" font-weight="600" fill="#7C93FF" text-anchor="end">@agentevents/host</text>
+<rect x="72.0" y="842" width="480.0" height="92" rx="16" fill="#17223F" stroke="rgba(255,255,255,0.10)" stroke-width="1.5"/>
+<rect x="72.0" y="858" width="6" height="60" rx="3" fill="#FF6B7D"/>
+<circle cx="112.0" cy="888.0" r="16" fill="none" stroke="#FF6B7D" stroke-width="2"/>
+<text x="112.0" y="895.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="750" fill="#FF6B7D" text-anchor="middle">1</text>
+<text x="144.0" y="882" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="680" fill="#EEF2FF" text-anchor="start">Safety gates</text>
+<text x="144.0" y="912" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#A6B1CF" text-anchor="start">provenance · expiry · loop · quiet · stop</text>
+<rect x="568.0" y="842" width="480.0" height="92" rx="16" fill="#17223F" stroke="rgba(255,255,255,0.10)" stroke-width="1.5"/>
+<rect x="568.0" y="858" width="6" height="60" rx="3" fill="#FFB547"/>
+<circle cx="608.0" cy="888.0" r="16" fill="none" stroke="#FFB547" stroke-width="2"/>
+<text x="608.0" y="895.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="750" fill="#FFB547" text-anchor="middle">2</text>
+<text x="640.0" y="882" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="680" fill="#EEF2FF" text-anchor="start">Rule gate</text>
+<text x="640.0" y="912" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#A6B1CF" text-anchor="start">verdict: run? · autonomy: what may it do?</text>
+<rect x="72.0" y="950" width="480.0" height="92" rx="16" fill="#17223F" stroke="rgba(255,255,255,0.10)" stroke-width="1.5"/>
+<rect x="72.0" y="966" width="6" height="60" rx="3" fill="#7C93FF"/>
+<circle cx="112.0" cy="996.0" r="16" fill="none" stroke="#7C93FF" stroke-width="2"/>
+<text x="112.0" y="1003.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="750" fill="#7C93FF" text-anchor="middle">3</text>
+<text x="144.0" y="990" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="680" fill="#EEF2FF" text-anchor="start">Subject thread + memory</text>
+<text x="144.0" y="1020" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#A6B1CF" text-anchor="start">one thread per incident or study</text>
+<rect x="568.0" y="950" width="480.0" height="92" rx="16" fill="#17223F" stroke="rgba(255,255,255,0.10)" stroke-width="1.5"/>
+<rect x="568.0" y="966" width="6" height="60" rx="3" fill="#34E3A8"/>
+<circle cx="608.0" cy="996.0" r="16" fill="none" stroke="#34E3A8" stroke-width="2"/>
+<text x="608.0" y="1003.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="750" fill="#34E3A8" text-anchor="middle">4</text>
+<text x="640.0" y="990" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="680" fill="#EEF2FF" text-anchor="start">Governed model turn</text>
+<text x="640.0" y="1020" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#A6B1CF" text-anchor="start">escaped rendering · scoped tools</text>
+<path d="M290.0 1084 V1172" stroke="#34E3A8" stroke-width="3.5" marker-end="url(#ahs)"/>
+<circle cx="230.0" cy="1128" r="19" fill="#7C93FF"/>
+<text x="230.0" y="1136" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="21" font-weight="800" fill="#0A1124" text-anchor="middle">3</text>
+<text x="316.0" y="1126" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20" font-weight="650" fill="#EEF2FF" text-anchor="start">wake</text>
+<text x="316.0" y="1152" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#A6B1CF" text-anchor="start">only if the gates pass</text>
+<rect x="40" y="1176" width="500.0" height="110" rx="20" fill="#111A33" stroke="#34E3A8" stroke-width="2"/>
+<text x="72" y="1224" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#EEF2FF" text-anchor="start">Model</text>
+<text x="72" y="1256" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#A6B1CF" text-anchor="start">Claude on Amazon Bedrock, or any Model adapter</text>
+<path d="M830.0 1084 V1172" stroke="#FFB547" stroke-width="3.5" marker-end="url(#aha)"/>
+<text x="848.0" y="1126" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="650" fill="#FFB547" text-anchor="start">propose_action</text>
+<text x="848.0" y="1152" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#A6B1CF" text-anchor="start">side effects need approval</text>
+<rect x="580.0" y="1176" width="500.0" height="110" rx="20" fill="rgba(255,181,71,0.10)" stroke="#FFB547" stroke-width="2"/>
+<text x="612.0" y="1224" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#FFB547" text-anchor="start">Human approval</text>
+<text x="612.0" y="1256" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#A6B1CF" text-anchor="start">fingerprinted · bound approver · TTL</text>
+<path d="M1080 1231.0 H1102 V508.0 H1086" stroke="#34E3A8" stroke-width="3" fill="none" marker-end="url(#ahs)"/>
+<text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="650" fill="#34E3A8" transform="translate(1114 1043.0) rotate(-90)" text-anchor="middle">approved action runs once</text>
+<text x="40" y="1340" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" font-weight="400" fill="#A6B1CF" text-anchor="start">Most events stop at the gates and never cost a model call.</text>
+</svg>

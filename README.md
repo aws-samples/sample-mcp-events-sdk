@@ -62,23 +62,9 @@ peers that only support the base extension still interoperate.
 
 ## How it works
 
-An event takes three hops:
+![How it works: an event goes from an upstream system to the MCP server, over MCP events to the host, and reaches the model only if it passes the gates. Side effects need human approval.](docs/media/how-it-works.svg)
 
-```mermaid
-flowchart LR
-  U[Upstream system<br/>monitoring, instruments, feeds] -- "signed webhook<br/>(Standard Webhooks)" --> S
-  subgraph S[MCP server · @agentevents/server]
-    direction TB
-    S1[verify + dedup] --> S2[mapping → envelope] --> S3[validate, redact, log] --> S4[situation engine]
-  end
-  S -- "MCP events<br/>list · poll · stream · webhook" --> H
-  subgraph H[MCP client · @agentevents/host]
-    direction TB
-    H1[safety gates] --> H2[rule gate<br/>verdict + autonomy] --> H3[subject thread<br/>+ memory] --> H4[governed model turn]
-  end
-  H4 -- "propose_action" --> P[Human approval]
-  P -- "approved, runs once" --> S
-```
+An event takes three hops:
 
 1. **Upstream to server.** A webhook receiver verifies the signature, a JSONata mapping builds the event envelope,
    and the server validates, redacts, deduplicates, logs, and groups events into situations.
