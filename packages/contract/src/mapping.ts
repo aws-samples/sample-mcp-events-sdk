@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import jsonata from 'jsonata';
-import { deterministicId, sha256, type Actor, type EventEnvelope, type Provenance } from './envelope';
+import { deterministicId, sha256, type Actor, type EventEnvelope } from './envelope';
+import { FilterLanguage, type Provenance } from './vocab';
 import type { SchemaRegistry } from './registry';
 
 /** What a transform produces. Envelope identity, tenant and trust fields are NOT the transform's to set. */
@@ -18,7 +19,7 @@ export interface MappedEvent {
 }
 
 export type Transform =
-  | { language: 'jsonata'; expression: string }
+  | { language: typeof FilterLanguage.Jsonata; expression: string }
   /** Escape hatch (spec E1 §2.5.1). MUST be pure: no I/O, clock or randomness. */
   | { language: 'code'; fn: (raw: unknown) => MappedEvent };
 

@@ -1,4 +1,5 @@
 import jsonata from 'jsonata';
+import { FilterLanguage } from './vocab';
 import { getPath, type EventEnvelope } from './envelope';
 import type { SchemaRegistry } from './registry';
 
@@ -19,10 +20,10 @@ export type PatternValue =
   | { exists: boolean };
 
 export type FilterSpec =
-  | { language: 'eb-pattern'; expression: Record<string, PatternValue[]> }
-  | { language: 'jsonata'; expression: string };
+  | { language: typeof FilterLanguage.EbPattern; expression: Record<string, PatternValue[]> }
+  | { language: typeof FilterLanguage.Jsonata; expression: string };
 
-export const FILTER_LANGUAGES = ['eb-pattern', 'jsonata'] as const;
+export const FILTER_LANGUAGES = [FilterLanguage.EbPattern, FilterLanguage.Jsonata] as const;
 
 const LIMITS = { paths: 10, values: 50, bytes: 2048 } as const;
 

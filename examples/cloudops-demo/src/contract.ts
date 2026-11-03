@@ -1,6 +1,7 @@
 import type { EventTypeDef, JsonSchema, Mapping } from '@agentevents/contract';
 import type { SituationConfig } from '@agentevents/core';
 
+import { MaskMode, MidTurn, Priority, Sensitivity, Severity, Verdict, FilterLanguage } from '@agentevents/contract';
 /** The published contract for the CloudOps example: schemas, mapping, situation config. */
 
 export const SCHEMA_BASE = 'https://events.example.com/schemas/ops';
@@ -19,7 +20,7 @@ const alarmData: JsonSchema = {
     value: { type: 'number', 'x-event': { filterable: true } },
     threshold: { type: 'number' },
     description: { type: 'string', 'x-event': { untrusted: true } },
-    onCallEmail: { type: 'string', 'x-event': { sensitivity: 'pii', mask: 'hash' } },
+    onCallEmail: { type: 'string', 'x-event': { sensitivity: Sensitivity.Pii, mask: MaskMode.Hash } },
   },
 };
 
@@ -43,11 +44,11 @@ export const alarmSituation: EventTypeDef = {
   situation: true,
   latencyP99Seconds: 60,
   hints: {
-    suggestedVerdict: 'wake',
-    midTurn: 'merge',
+    suggestedVerdict: Verdict.Wake,
+    midTurn: MidTurn.Merge,
     coalesce: { by: ['subject'], windowSeconds: 1, max: 20 },
     replyTools: ['describe_service', 'get_alarm_history', 'restart_service'],
-    priority: 'high',
+    priority: Priority.High,
     deadlineSeconds: 120,
   },
 };
@@ -66,7 +67,7 @@ export const alarmStorm: EventTypeDef = {
     },
   },
   situation: true,
-  hints: { suggestedVerdict: 'wake', midTurn: 'queue', coalesce: { by: ['subject'], windowSeconds: 1, max: 1 } },
+  hints: { suggestedVerdict: Verdict.Wake, midTurn: MidTurn.Queue, coalesce: { by: ['subject'], windowSeconds: 1, max: 1 } },
 };
 
 /** Monitoring webhook payload → contract. Upstream id drives L1 dedup and the deterministic `id`. */
@@ -78,7 +79,7 @@ export const monitoringMapping: Mapping = {
   upstreamId: 'eventId',
   sourceUri: '"monitoring.example.com/" & account & "/" & region',
   transform: {
-    language: 'jsonata',
+    language: FilterLanguage.Jsonata,
     expression: `{
       "time": time,
       "subject": "service/" & alarm.service,
@@ -98,14 +99,14 @@ export const monitoringMapping: Mapping = {
       input: {
         eventId: 'evt-1', account: '111122223333', region: 'us-east-1', time: '2026-11-02T10:00:00Z',
         changedBy: 'monitoring.amazonaws.com',
-        alarm: { name: 'checkout-api-p99', service: 'checkout-api', env: 'prod', state: 'ALARM', severity: 'high', metric: 'p99_latency_ms', value: 2300, threshold: 1000, description: 'p99 above 1s', onCall: 'oncall@example.com' },
+        alarm: { name: 'checkout-api-p99', service: 'checkout-api', env: 'prod', state: 'ALARM', severity: Severity.High, metric: 'p99_latency_ms', value: 2300, threshold: 1000, description: 'p99 above 1s', onCall: 'oncall@example.com' },
       },
       expect: {
         time: '2026-11-02T10:00:00Z',
         subject: 'service/checkout-api',
         partitionkey: 'service/checkout-api',
         actor: { kind: 'service', principal: 'monitoring.amazonaws.com' },
-        data: { alarm: 'checkout-api-p99', service: 'checkout-api', env: 'prod', state: 'ALARM', severity: 'high', metric: 'p99_latency_ms', value: 2300, threshold: 1000, description: 'p99 above 1s', onCallEmail: 'oncall@example.com' },
+        data: { alarm: 'checkout-api-p99', service: 'checkout-api', env: 'prod', state: 'ALARM', severity: Severity.High, metric: 'p99_latency_ms', value: 2300, threshold: 1000, description: 'p99 above 1s', onCallEmail: 'oncall@example.com' },
       },
     },
   ],

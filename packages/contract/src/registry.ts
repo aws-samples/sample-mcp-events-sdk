@@ -1,13 +1,14 @@
 import { Ajv, type ValidateFunction } from 'ajv';
 import { parseType, type EventEnvelope } from './envelope';
+import type { MaskMode, MidTurn, Priority, Sensitivity, Stability, Verdict } from './vocab';
 
 /** Spec E1 §2.3 — the `x-event` JSON Schema vocabulary keyword. */
 export interface FieldAnnotation {
   filterable?: boolean;
-  sensitivity?: 'none' | 'pii' | 'sensitive' | 'secret';
-  mask?: 'full' | 'partial' | 'hash' | 'null';
+  sensitivity?: Sensitivity;
+  mask?: MaskMode;
   untrusted?: boolean;
-  stability?: 'stable' | 'experimental';
+  stability?: Stability;
   enumClosed?: boolean;
   arrivesLate?: boolean;
   pushdown?: boolean;
@@ -26,12 +27,12 @@ export type JsonSchema = {
 
 /** Spec E3 §4.1 — server-suggested activation hints. The host decides. */
 export interface ActivationHints {
-  suggestedVerdict?: 'wake' | 'digest' | 'store' | 'drop';
-  midTurn?: 'interrupt' | 'queue' | 'merge' | 'reject';
+  suggestedVerdict?: Extract<Verdict, 'wake' | 'digest' | 'store' | 'drop'>;
+  midTurn?: MidTurn;
   coalesce?: { by: string[]; windowSeconds: number; max: number };
   replyTools?: string[];
   resultSchema?: JsonSchema;
-  priority?: 'low' | 'normal' | 'high';
+  priority?: Priority;
   deadlineSeconds?: number;
 }
 

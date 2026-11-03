@@ -1,23 +1,20 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { ActorKind, Provenance, Severity, SituationFlag, Transition } from './vocab';
 
 /** Spec E1 §2.1. Only `live` and `redrive` may ever wake a model or take a decision. */
-export const Provenance = z.enum(['live', 'redrive', 'replay', 'recover', 'baseline']);
-export type Provenance = z.infer<typeof Provenance>;
-
-export const ActorKind = z.enum(['user', 'service', 'platform', 'unknown']);
-export const Actor = z.object({ kind: ActorKind, principal: z.string().optional() });
+export const Actor = z.object({ kind: z.enum(ActorKind), principal: z.string().optional() });
 export type Actor = z.infer<typeof Actor>;
 
 export const SituationMeta = z.object({
   situationkey: z.string(),
-  transition: z.enum(['open', 'update', 'resolve']),
+  transition: z.enum(Transition),
   revision: z.number().int().positive(),
   previousid: z.string().optional(),
-  severity: z.enum(['info', 'low', 'medium', 'high', 'critical']),
+  severity: z.enum(Severity),
   occurrences: z.object({ count: z.number().int(), firstSeenAt: z.string(), lastSeenAt: z.string() }),
   evidence: z.object({ first: z.array(z.string()), last: z.array(z.string()) }),
-  flags: z.array(z.enum(['flapping', 'suppressed', 'storm', 'late', 'stale', 'seeded'])),
+  flags: z.array(z.enum(SituationFlag)),
   group: z.object({ key: z.string(), dimensions: z.record(z.string(), z.string()) }).optional(),
 });
 export type SituationMeta = z.infer<typeof SituationMeta>;
@@ -40,7 +37,7 @@ export const EventEnvelope = z.object({
   actor: Actor.optional(),
   origin: z.string().optional(),
   tenantid: z.string().optional(),
-  provenance: Provenance,
+  provenance: z.enum(Provenance),
   expiresat: z.string().datetime({ offset: true }).optional(),
   dedupkey: z.string().optional(),
   untrustedfields: z.array(z.string()),

@@ -1,17 +1,17 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { EVENTS_EXT, EXT, webhooks, type EventEnvelope } from '@agentevents/contract';
+import { EVENTS_EXT, EXT, webhooks, type EventEnvelope, Autonomy, DeliveryMode, Verdict, FilterLanguage, Severity, Transition } from '@agentevents/contract';
 import { MemoryDecisionStore, readAll, type Decision, type DecisionStore, type EventLog, type Rule, type RuntimeState } from '@agentevents/core';
 import { EventHost, bedrockClaudeModel, claudeModel, type HostOptions, type Model } from '@agentevents/host';
-import { FileRuleLog, MemoryRuleLog, RuleStore, createRulesServer, type Principal, type RuleLog } from '@agentevents/rules';
+import { FileRuleLog, MemoryRuleLog, RuleStore, createRulesServer, type Principal, type RuleLog, ChangeOp, DeployMode, RequestOrigin } from '@agentevents/rules';
 import { startWebhookReceiver, type WebhookReceiver } from '@agentevents/server';
 import { alarmSituation, alarmStorm } from './contract';
 import { scriptedInvestigator } from './agent';
 import { createOpsServer, type OpsServer } from './ops-server';
 
 export const TENANT = 'acme';
-export const OWNER: Principal = { id: 'pat@acme.example', roles: ['rule-owner'], origin: 'user' };
+export const OWNER: Principal = { id: 'pat@acme.example', roles: ['rule-owner'], origin: RequestOrigin.User };
 
 /**
  * What the on-call owner tells agentevents to let through, in their own words, and the structured rule
@@ -24,9 +24,9 @@ export const SEED_RULES: Rule[] = [
     priority: 20,
     description: 'Wake on new high/critical prod alarms; the agent may propose fixes',
     types: [alarmSituation.type],
-    filter: { language: 'eb-pattern', expression: { 'data.env': ['prod'], 'situation.transition': ['open'], 'situation.severity': ['high', 'critical'] } },
-    verdict: 'wake',
-    autonomy: 'propose',
+    filter: { language: FilterLanguage.EbPattern, expression: { 'data.env': ['prod'], 'situation.transition': [Transition.Open], 'situation.severity': [Severity.High, Severity.Critical] } },
+    verdict: Verdict.Wake,
+    autonomy: Autonomy.Propose,
   },
   {
     id: 'prod-open-investigate',
@@ -34,9 +34,9 @@ export const SEED_RULES: Rule[] = [
     priority: 50,
     description: 'Wake on any new prod alarm; investigate only',
     types: [alarmSituation.type],
-    filter: { language: 'eb-pattern', expression: { 'data.env': ['prod'], 'situation.transition': ['open'] } },
-    verdict: 'wake',
-    autonomy: 'investigate',
+    filter: { language: FilterLanguage.EbPattern, expression: { 'data.env': ['prod'], 'situation.transition': [Transition.Open] } },
+    verdict: Verdict.Wake,
+    autonomy: Autonomy.Investigate,
   },
   {
     id: 'staging-store',
@@ -44,8 +44,8 @@ export const SEED_RULES: Rule[] = [
     priority: 30,
     description: 'Store staging alarms without waking',
     types: [alarmSituation.type],
-    filter: { language: 'eb-pattern', expression: { 'data.env': ['staging', 'dev'] } },
-    verdict: 'store',
+    filter: { language: FilterLanguage.EbPattern, expression: { 'data.env': ['staging', 'dev'] } },
+    verdict: Verdict.Store,
   },
   {
     id: 'storm-investigate',
@@ -53,9 +53,9 @@ export const SEED_RULES: Rule[] = [
     priority: 10,
     description: 'Wake once for an alarm storm',
     types: [alarmStorm.type],
-    filter: { language: 'eb-pattern', expression: { 'situation.transition': ['open'] } },
-    verdict: 'wake',
-    autonomy: 'investigate',
+    filter: { language: FilterLanguage.EbPattern, expression: { 'situation.transition': [Transition.Open] } },
+    verdict: Verdict.Wake,
+    autonomy: Autonomy.Investigate,
   },
 ];
 
@@ -85,13 +85,13 @@ export async function configureRules(rules: RuleStore, by: Principal, rulesList:
   for (const r of rulesList) {
     const { version: _v, ...rule } = r;
     const request = requests[r.id] ?? r.description;
-    const p = await rules.propose({ op: 'upsert', rule, request }, by);
+    const p = await rules.propose({ op: ChangeOp.Upsert, rule, request }, by);
     if (!p.ok) throw new Error(`${r.id}: ${p.reason}`);
     if (p.value.issues.length) throw new Error(`${r.id}: ${p.value.issues.map((i) => i.reason).join('; ')}`);
     await rules.backtest(p.value.changeId, []);
     const a = await rules.approve(p.value.changeId, p.value.fingerprint, by);
     if (!a.ok) throw new Error(`${r.id}: ${a.reason}`);
-    await rules.deploy(p.value.changeId, 'live');
+    await rules.deploy(p.value.changeId, DeployMode.Live);
     out.push({ request, ruleId: r.id, verdict: r.verdict, ...(r.autonomy ? { autonomy: r.autonomy } : {}), tier: p.value.tier, approvedBy: by.id });
   }
   return out;
@@ -161,7 +161,7 @@ export async function startApp(opts: { model?: Model; rulesPath?: string; host?:
     ...opts.host,
   });
   const opsClient = await connect(ops.events.mcp, 'cloudops-host');
-  await host.attach(opsClient, { names: [alarmSituation.type, alarmStorm.type], mode: 'stream' });
+  await host.attach(opsClient, { names: [alarmSituation.type, alarmStorm.type], mode: DeliveryMode.Stream });
 
   // The user's own chat session talks to the rules server; event-triggered turns never see it.
   const rulesServer = createRulesServer({

@@ -1,6 +1,7 @@
-import { evaluateFilter, getPath, validateFilter, type FilterSpec, type SchemaRegistry } from '@agentevents/contract';
-import type { Autonomy, Gate, Verdict } from './gates';
+import { evaluateFilter, getPath, validateFilter, type FilterSpec, type SchemaRegistry, Autonomy, Verdict } from '@agentevents/contract';
+import type { Gate } from './gates';
 
+import { GateStage } from './gates';
 /**
  * A rule is structured and deterministic (spec E5): never prose. Rules live in the rule store and
  * change only through its lifecycle.
@@ -42,7 +43,7 @@ export function validateRule(rule: Rule, registry: SchemaRegistry): RuleIssue[] 
       for (const t of rule.types) if (!registry.fields(t).get(by)) issues.push({ path: 'window.by', reason: `unknown field ${by} in ${t}` });
     }
   }
-  if (rule.autonomy && !['wake', 'escalate'].includes(rule.verdict)) {
+  if (rule.autonomy && !([Verdict.Wake, Verdict.Escalate] as Verdict[]).includes(rule.verdict)) {
     issues.push({ path: 'autonomy', reason: 'autonomy only applies to wake or escalate verdicts' });
   }
   return issues;
@@ -53,7 +54,7 @@ export function ruleGate(activeRules: () => readonly Rule[]): Gate {
   return {
     id: 'rules',
     version: '1',
-    stage: 'rule',
+    stage: GateStage.Rule,
     evaluate: async ({ event, state }) => {
       const rules = [...activeRules()].sort(
         (a, b) => Number(!!b.mandatory) - Number(!!a.mandatory) || (a.priority ?? 100) - (b.priority ?? 100),

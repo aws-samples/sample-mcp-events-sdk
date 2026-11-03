@@ -1,10 +1,10 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { EVENTS_EXT, EXT } from '@agentevents/contract';
+import { EVENTS_EXT, EXT, DeliveryMode } from '@agentevents/contract';
 import { MemoryDecisionStore, type ThreadMemory } from '@agentevents/core';
 import { EventHost, bedrockClaudeModel, claudeModel, type HostOptions, type Model } from '@agentevents/host';
 import { CONFIG_REQUESTS, RULES, paper, reading } from './contract';
-import { MemoryRuleLog, RuleStore } from '@agentevents/rules';
+import { MemoryRuleLog, RuleStore, ChangeOp, DeployMode, RequestOrigin } from '@agentevents/rules';
 import { scriptedResearchAssistant } from './assistant';
 import { PHASES, createLabServer, labFeed, type Phase } from './lab-server';
 
@@ -15,16 +15,16 @@ export async function startLab(opts: { model?: Model; threadMemory?: ThreadMemor
   const lab = createLabServer({ tenantid: TENANT });
   // The configuration step: the researcher's requests become versioned, approved rules.
   const rules = await RuleStore.open(lab.events.registry, { log: new MemoryRuleLog() });
-  const researcher = { id: RESEARCHER, roles: ['rule-owner'], origin: 'user' as const };
+  const researcher = { id: RESEARCHER, roles: ['rule-owner'], origin: RequestOrigin.User };
   const configuration: { request: string; ruleId: string; verdict: string; tier: string }[] = [];
   for (const r of RULES) {
     const { version: _v, ...rule } = r;
-    const p = await rules.propose({ op: 'upsert', rule, request: CONFIG_REQUESTS[r.id] ?? r.description }, researcher);
+    const p = await rules.propose({ op: ChangeOp.Upsert, rule, request: CONFIG_REQUESTS[r.id] ?? r.description }, researcher);
     if (!p.ok || p.value.issues.length) throw new Error(`${r.id}: ${p.ok ? p.value.issues.map((i) => i.reason).join('; ') : p.reason}`);
     await rules.backtest(p.value.changeId, []);
     const a = await rules.approve(p.value.changeId, p.value.fingerprint, researcher);
     if (!a.ok) throw new Error(`${r.id}: ${a.reason}`);
-    await rules.deploy(p.value.changeId, 'live');
+    await rules.deploy(p.value.changeId, DeployMode.Live);
     configuration.push({ request: CONFIG_REQUESTS[r.id] ?? r.description, ruleId: r.id, verdict: r.verdict, tier: p.value.tier });
   }
   const decisions = new MemoryDecisionStore();
@@ -42,7 +42,7 @@ export async function startLab(opts: { model?: Model; threadMemory?: ThreadMemor
   const client = new Client({ name: 'research-host', version: '0.1.0' }, { capabilities: { extensions: { [EVENTS_EXT]: {}, [EXT.contract]: {} } } });
   await lab.events.mcp.connect(b);
   await client.connect(a);
-  await host.attach(client, { names: [reading.type, paper.type], mode: 'stream' });
+  await host.attach(client, { names: [reading.type, paper.type], mode: DeliveryMode.Stream });
 
   const phases = labFeed({ startMs: Date.now() - 25 * 60_000, spanMs: 24 * 60_000 });
 

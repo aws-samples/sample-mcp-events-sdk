@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { sha256, type EventEnvelope, type SchemaRegistry } from '@agentevents/contract';
+import { sha256, type EventEnvelope, type SchemaRegistry, Autonomy, Verdict } from '@agentevents/contract';
 import {
   GatePipeline,
   diffDecisions,
@@ -14,18 +14,36 @@ import {
 } from '@agentevents/core';
 import { MemoryRuleLog, type RuleLog } from './persistence';
 
-export type RiskTier = 'low' | 'medium' | 'high';
+type ValueOf<T> = T[keyof T];
+
+export const RiskTier = { Low: 'low', Medium: 'medium', High: 'high' } as const;
+export type RiskTier = ValueOf<typeof RiskTier>;
+
+/** `event` = the request came from an event-triggered session. Such changes always need a human. */
+export const RequestOrigin = { User: 'user', Event: 'event' } as const;
+export type RequestOrigin = ValueOf<typeof RequestOrigin>;
+
+export const RuleState = { Live: 'live', Shadow: 'shadow', Superseded: 'superseded', Retired: 'retired' } as const;
+export type RuleState = ValueOf<typeof RuleState>;
+
+export const ChangeOp = { Upsert: 'upsert', Retire: 'retire' } as const;
+export type ChangeOp = ValueOf<typeof ChangeOp>;
+
+export const ChangeState = { Proposed: 'proposed', Approved: 'approved', Rejected: 'rejected', Deployed: 'deployed' } as const;
+export type ChangeState = ValueOf<typeof ChangeState>;
+
+export const DeployMode = { Shadow: 'shadow', Live: 'live' } as const;
+export type DeployMode = ValueOf<typeof DeployMode>;
 
 export interface Principal {
   id: string;
   roles: readonly string[];
-  /** `event` = the request came from an event-triggered session. Such changes always need a human. */
-  origin: 'user' | 'event';
+  origin: RequestOrigin;
 }
 
 export interface RuleVersion {
   rule: Rule;
-  state: 'live' | 'shadow' | 'superseded' | 'retired';
+  state: RuleState;
   changeId: string;
   approvedBy: string;
   deployedAt: string;
@@ -33,7 +51,7 @@ export interface RuleVersion {
 
 export interface RuleChange {
   changeId: string;
-  op: 'upsert' | 'retire';
+  op: ChangeOp;
   rule: Rule;
   request: { text: string; by: string; origin: Principal['origin'] };
   issues: RuleIssue[];
@@ -42,7 +60,7 @@ export interface RuleChange {
   fingerprint: string;
   backtest?: { report: ImpactReport; diff: ImpactDiff; window: { from: string; to: string; events: number } };
   shadowed: boolean;
-  state: 'proposed' | 'approved' | 'rejected' | 'deployed';
+  state: ChangeState;
   approvedBy?: string;
   createdAt: string;
 }
@@ -54,15 +72,15 @@ const fail = (code: string, reason: string): { ok: false; code: string; reason: 
 export function classify(op: RuleChange['op'], rule: Rule, live: Rule | undefined): { tier: RiskTier; reasons: string[] } {
   const reasons: string[] = [];
   if (live?.mandatory || rule.mandatory) reasons.push('touches a mandatory rule');
-  if (rule.verdict === 'decide' || rule.verdict === 'escalate' || live?.verdict === 'decide' || live?.verdict === 'escalate') reasons.push('changes decide/escalate verdicts');
-  if (rule.autonomy === 'act') reasons.push('grants unattended action (act)');
-  if ((rule.verdict === 'drop' || rule.verdict === 'store') && !rule.filter && !rule.window) reasons.push('suppresses an event type entirely');
-  if (op === 'retire' && (live?.verdict === 'wake' || live?.verdict === 'escalate')) reasons.push('removes a rule that wakes or escalates');
-  if (reasons.length) return { tier: 'high', reasons };
+  if (rule.verdict === Verdict.Decide || rule.verdict === Verdict.Escalate || live?.verdict === Verdict.Decide || live?.verdict === Verdict.Escalate) reasons.push('changes decide/escalate verdicts');
+  if (rule.autonomy === Autonomy.Act) reasons.push('grants unattended action (act)');
+  if ((rule.verdict === Verdict.Drop || rule.verdict === Verdict.Store) && !rule.filter && !rule.window) reasons.push('suppresses an event type entirely');
+  if (op === ChangeOp.Retire && (live?.verdict === Verdict.Wake || live?.verdict === Verdict.Escalate)) reasons.push('removes a rule that wakes or escalates');
+  if (reasons.length) return { tier: RiskTier.High, reasons };
   if (rule.window) reasons.push('stateful threshold rule');
-  if (rule.verdict === 'wake' || rule.verdict === 'drop') reasons.push(`${rule.verdict} rule`);
-  if (reasons.length) return { tier: 'medium', reasons };
-  return { tier: 'low', reasons: ['digest/store with a filter'] };
+  if (rule.verdict === Verdict.Wake || rule.verdict === Verdict.Drop) reasons.push(`${rule.verdict} rule`);
+  if (reasons.length) return { tier: RiskTier.Medium, reasons };
+  return { tier: RiskTier.Low, reasons: ['digest/store with a filter'] };
 }
 
 /**
@@ -104,15 +122,15 @@ export class RuleStore {
   /** Seed rules directly (bootstrap, or an admin's mandatory baseline). */
   async seed(rule: Rule, by: string): Promise<void> {
     if (this.versions.has(rule.id)) return; // already persisted
-    await this.push(rule.id, { rule, state: 'live', changeId: 'seed', approvedBy: by, deployedAt: new Date(this.now()).toISOString() });
+    await this.push(rule.id, { rule, state: RuleState.Live, changeId: 'seed', approvedBy: by, deployedAt: new Date(this.now()).toISOString() });
   }
 
   live(): Rule[] {
-    return [...this.versions.values()].flatMap((vs) => vs.filter((v) => v.state === 'live').map((v) => v.rule));
+    return [...this.versions.values()].flatMap((vs) => vs.filter((v) => v.state === RuleState.Live).map((v) => v.rule));
   }
 
   shadow(): Rule[] {
-    return [...this.versions.values()].flatMap((vs) => vs.filter((v) => v.state === 'shadow').map((v) => v.rule));
+    return [...this.versions.values()].flatMap((vs) => vs.filter((v) => v.state === RuleState.Shadow).map((v) => v.rule));
   }
 
   history(ruleId: string): RuleVersion[] {
@@ -131,8 +149,8 @@ export class RuleStore {
     if (live?.rule.mandatory && !by.roles.includes(this.adminRole)) {
       return fail('MANDATORY', `${rule.id} is mandatory; only ${this.adminRole} may change it`);
     }
-    if (input.op === 'retire' && !live) return fail('NOT_FOUND', `no live rule ${rule.id}`);
-    const issues = input.op === 'upsert' ? validateRule(rule, this.registry) : [];
+    if (input.op === ChangeOp.Retire && !live) return fail('NOT_FOUND', `no live rule ${rule.id}`);
+    const issues = input.op === ChangeOp.Upsert ? validateRule(rule, this.registry) : [];
     const { tier, reasons } = classify(input.op, rule, live?.rule);
     const change: RuleChange = {
       changeId: `chg_${randomUUID()}`,
@@ -156,10 +174,10 @@ export class RuleStore {
   async backtest(changeId: string, history: readonly EventEnvelope[]): Promise<Result<RuleChange>> {
     const c = this.changes.get(changeId);
     if (!c) return fail('NOT_FOUND', 'no such change');
-    if (c.state === 'rejected') return fail('INVALID', 'fix validation issues first');
+    if (c.state === ChangeState.Rejected) return fail('INVALID', 'fix validation issues first');
     const current = this.live();
-    const proposed = c.op === 'retire' ? current.filter((r) => r.id !== c.rule.id) : [...current.filter((r) => r.id !== c.rule.id), c.rule];
-    const mk = (rules: Rule[]) => () => new GatePipeline([provenanceGate()], () => [ruleGate(() => rules)], { defaultVerdict: 'store', defaultAutonomy: 'investigate' });
+    const proposed = c.op === ChangeOp.Retire ? current.filter((r) => r.id !== c.rule.id) : [...current.filter((r) => r.id !== c.rule.id), c.rule];
+    const mk = (rules: Rule[]) => () => new GatePipeline([provenanceGate()], () => [ruleGate(() => rules)], { defaultVerdict: Verdict.Store, defaultAutonomy: Autonomy.Investigate });
     const a = await replay(history, mk(current), this.registry, { asLive: true });
     const b = await replay(history, mk(proposed), this.registry, { asLive: true });
     c.backtest = {
@@ -174,11 +192,11 @@ export class RuleStore {
   async approve(changeId: string, fingerprint: string, by: Principal): Promise<Result<RuleChange>> {
     const c = this.changes.get(changeId);
     if (!c) return fail('NOT_FOUND', 'no such change');
-    if (c.state !== 'proposed') return fail('STATE', `change is ${c.state}`);
+    if (c.state !== ChangeState.Proposed) return fail('STATE', `change is ${c.state}`);
     if (c.fingerprint !== fingerprint) return fail('FINGERPRINT_MISMATCH', 'the change differs from what was reviewed');
     if (!c.backtest) return fail('NO_BACKTEST', 'run rules_backtest first; approve the impact report, not the wording');
-    if (by.origin === 'event') return fail('EVENT_ORIGIN', 'approvals cannot come from an event-triggered session');
-    const eventOrigin = c.request.origin === 'event';
+    if (by.origin === RequestOrigin.Event) return fail('EVENT_ORIGIN', 'approvals cannot come from an event-triggered session');
+    const eventOrigin = c.request.origin === RequestOrigin.Event;
     switch (c.tier) {
       case 'low':
         if (!eventOrigin && by.id === c.request.by && this.autoApprove.has('low')) break;
@@ -193,36 +211,36 @@ export class RuleStore {
         if (!c.shadowed) return fail('NO_SHADOW', 'high tier must run in shadow mode before approval');
         break;
     }
-    c.state = 'approved';
+    c.state = ChangeState.Approved;
     c.approvedBy = by.id;
     await this.saveChange(c);
     return { ok: true, value: c };
   }
 
   /** Atomic deploy. `shadow` runs alongside live without effect; `live` requires approval. */
-  async deploy(changeId: string, mode: 'shadow' | 'live'): Promise<Result<RuleVersion | undefined>> {
+  async deploy(changeId: string, mode: DeployMode): Promise<Result<RuleVersion | undefined>> {
     const c = this.changes.get(changeId);
     if (!c) return fail('NOT_FOUND', 'no such change');
     const at = new Date(this.now()).toISOString();
-    if (mode === 'shadow') {
-      if (c.state === 'rejected') return fail('INVALID', 'invalid change');
+    if (mode === DeployMode.Shadow) {
+      if (c.state === ChangeState.Rejected) return fail('INVALID', 'invalid change');
       c.shadowed = true;
-      const v: RuleVersion = { rule: c.rule, state: 'shadow', changeId, approvedBy: 'shadow', deployedAt: at };
+      const v: RuleVersion = { rule: c.rule, state: RuleState.Shadow, changeId, approvedBy: 'shadow', deployedAt: at };
       await this.push(c.rule.id, v);
       await this.saveChange(c);
       return { ok: true, value: v };
     }
-    if (c.state !== 'approved') return fail('NOT_APPROVED', 'approve before deploying live');
-    for (const v of this.versions.get(c.rule.id) ?? []) if (v.state === 'live' || v.state === 'shadow') v.state = 'superseded';
-    c.state = 'deployed';
-    if (c.op === 'retire') {
+    if (c.state !== ChangeState.Approved) return fail('NOT_APPROVED', 'approve before deploying live');
+    for (const v of this.versions.get(c.rule.id) ?? []) if (v.state === RuleState.Live || v.state === RuleState.Shadow) v.state = RuleState.Superseded;
+    c.state = ChangeState.Deployed;
+    if (c.op === ChangeOp.Retire) {
       const last = this.versions.get(c.rule.id)?.at(-1);
-      if (last) last.state = 'retired';
+      if (last) last.state = RuleState.Retired;
       await this.saveRule(c.rule.id);
       await this.saveChange(c);
       return { ok: true, value: undefined };
     }
-    const v: RuleVersion = { rule: c.rule, state: 'live', changeId, approvedBy: c.approvedBy ?? '', deployedAt: at };
+    const v: RuleVersion = { rule: c.rule, state: RuleState.Live, changeId, approvedBy: c.approvedBy ?? '', deployedAt: at };
     await this.push(c.rule.id, v);
     await this.saveChange(c);
     return { ok: true, value: v };
@@ -230,27 +248,27 @@ export class RuleStore {
 
   /** One-step rollback to a previous version (as a new version, so history stays append-only). */
   async rollback(ruleId: string, toVersion: number, by: Principal): Promise<Result<RuleVersion>> {
-    if (by.origin === 'event') return fail('EVENT_ORIGIN', 'rollbacks cannot come from an event-triggered session');
+    if (by.origin === RequestOrigin.Event) return fail('EVENT_ORIGIN', 'rollbacks cannot come from an event-triggered session');
     const vs = this.versions.get(ruleId);
     const target = vs?.find((v) => v.rule.version === toVersion);
     if (!vs || !target) return fail('NOT_FOUND', `no version ${toVersion} of ${ruleId}`);
-    if (target.rule.mandatory || vs.some((v) => v.state === 'live' && v.rule.mandatory)) {
+    if (target.rule.mandatory || vs.some((v) => v.state === RuleState.Live && v.rule.mandatory)) {
       if (!by.roles.includes(this.adminRole)) return fail('MANDATORY', 'mandatory rule');
     }
     // A rollback is a rule change: classify what it would restore against what is live now.
-    const { tier, reasons } = classify('upsert', target.rule, this.liveVersion(ruleId)?.rule);
+    const { tier, reasons } = classify(ChangeOp.Upsert, target.rule, this.liveVersion(ruleId)?.rule);
     if (!by.roles.includes(this.ownerRole) && !by.roles.includes(this.adminRole)) {
       return fail('APPROVER', `rollback needs ${this.ownerRole} or ${this.adminRole}`);
     }
-    if (tier === 'high') {
+    if (tier === RiskTier.High) {
       // High-tier changes need a backtest, shadow mode and a separate named approver, which a
       // one-step rollback cannot provide: restore the version through rules_propose instead.
       return fail('HIGH_TIER', `restoring v${toVersion} is high risk (${reasons.join('; ')}); propose it as a change`);
     }
-    for (const v of vs) if (v.state === 'live') v.state = 'superseded';
+    for (const v of vs) if (v.state === RuleState.Live) v.state = RuleState.Superseded;
     const next: RuleVersion = {
       rule: { ...target.rule, version: (vs.at(-1)?.rule.version ?? 0) + 1 },
-      state: 'live',
+      state: RuleState.Live,
       changeId: `rollback:${toVersion}`,
       approvedBy: by.id,
       deployedAt: new Date(this.now()).toISOString(),
@@ -261,7 +279,7 @@ export class RuleStore {
   }
 
   private liveVersion(id: string): RuleVersion | undefined {
-    return this.versions.get(id)?.find((v) => v.state === 'live');
+    return this.versions.get(id)?.find((v) => v.state === RuleState.Live);
   }
 
   private async push(id: string, v: RuleVersion): Promise<void> {

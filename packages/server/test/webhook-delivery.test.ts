@@ -4,7 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { EmptyResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { afterEach, describe, expect, it } from 'vitest';
-import { SubscribeResult, WEBHOOK_METHODS, webhooks, type EventTypeDef, type WebhookBody } from '@agentevents/contract';
+import { SubscribeResult, WEBHOOK_METHODS, webhooks, type EventTypeDef, type WebhookBody, DeliveryMode, DeliveryStatus, Verdict } from '@agentevents/contract';
 import { EventHost, scriptedModel, startHostWebhookEndpoint } from '@agentevents/host';
 import { EventServer, checkUrlShape, resolveForDelivery } from '@agentevents/server';
 import { makeEvent } from '@agentevents/testkit';
@@ -90,7 +90,7 @@ describe('SEP-3415 webhook delivery', () => {
     const { subscribe, ingest, idle } = await setup();
     const secret = webhooks.generateSecret();
     const sub = await subscribe({ names: [def.type], url: r.url, secret, ttlMs: 60_000 });
-    expect(sub).toMatchObject({ deliveryStatus: 'active', ttlMs: 60_000 });
+    expect(sub).toMatchObject({ deliveryStatus: DeliveryStatus.Active, ttlMs: 60_000 });
     for (const n of [1, 2, 3]) await ingest(n);
     await idle();
     const events = r.got.filter((g) => g.body.type === 'event');
@@ -106,7 +106,7 @@ describe('SEP-3415 webhook delivery', () => {
     closers.push(r.close);
     const { subscribe, ingest, idle } = await setup();
     const sub = await subscribe({ names: [def.type], url: r.url, secret: webhooks.generateSecret() });
-    expect(sub).toMatchObject({ deliveryStatus: 'failed', lastError: { category: 'challenge_failed' } });
+    expect(sub).toMatchObject({ deliveryStatus: DeliveryStatus.Failed, lastError: { category: 'challenge_failed' } });
     await ingest(1);
     await idle();
     expect(r.got.filter((g) => g.body.type === 'event')).toHaveLength(0);
@@ -116,7 +116,7 @@ describe('SEP-3415 webhook delivery', () => {
     const { subscribe } = await setup();
     await expect(subscribe({ names: [def.type], url: 'http://10.0.0.5/h', secret: webhooks.generateSecret() })).rejects.toThrow(/url rejected/u);
     const viaHttps = await subscribe({ names: [def.type], url: 'https://169.254.169.254/latest/meta-data', secret: webhooks.generateSecret() });
-    expect(viaHttps).toMatchObject({ deliveryStatus: 'failed', lastError: { category: 'url_rejected' } });
+    expect(viaHttps).toMatchObject({ deliveryStatus: DeliveryStatus.Failed, lastError: { category: 'url_rejected' } });
   });
 
   it('retries with backoff; after exhausting, pauses at the failed event and resumes on refresh (at-least-once)', async () => {
@@ -128,10 +128,10 @@ describe('SEP-3415 webhook delivery', () => {
     await ingest(1);
     await ingest(2);
     await idle();
-    expect(server.delivery!.get(sub.subscriptionId)).toMatchObject({ status: 'failing', lastError: { category: 'delivery_failed', attempts: 3 } });
+    expect(server.delivery!.get(sub.subscriptionId)).toMatchObject({ status: DeliveryStatus.Failing, lastError: { category: 'delivery_failed', attempts: 3 } });
     expect(r.got.filter((g) => g.body.type === 'event').length).toBe(3); // 3 attempts at event 1, none at event 2
     down = false;
-    expect((await subscribe({ subscriptionId: sub.subscriptionId })).deliveryStatus).toBe('active');
+    expect((await subscribe({ subscriptionId: sub.subscriptionId })).deliveryStatus).toBe(DeliveryStatus.Active);
     await idle();
     const ok = r.got.filter((g) => g.body.type === 'event').slice(3);
     expect(ok.map((g) => (g.body as unknown as { event: { data: { n: number } } }).event.data.n)).toEqual([1, 2]);
@@ -175,7 +175,7 @@ describe('SEP-3415 webhook delivery', () => {
     await new Promise((res) => setTimeout(res, 60));
     await ingest(1);
     await idle();
-    expect(server.delivery!.get(short.subscriptionId)?.status).toBe('expired');
+    expect(server.delivery!.get(short.subscriptionId)?.status).toBe(DeliveryStatus.Expired);
     const before = r.got.length;
     const sub = await subscribe({ names: [def.type], url: r.url, secret: webhooks.generateSecret() });
     await client.request({ method: WEBHOOK_METHODS.unsubscribe, params: { subscriptionId: sub.subscriptionId } }, EmptyResultSchema);
@@ -191,8 +191,8 @@ describe('host webhook mode', () => {
     const endpoint = await startHostWebhookEndpoint();
     closers.push(endpoint.close);
     const model = scriptedModel('s', async () => '```result\n{"summary":"ok","cause":"c","nextStep":"n"}\n```');
-    const host = new EventHost({ model, owner: { id: 'u' }, rules: () => [{ id: 'w', version: 1, description: 'wake', types: [def.type], verdict: 'wake' }], coalesceMs: 10 });
-    await host.attach(client, { names: [def.type], mode: 'webhook', webhook: { endpoint } });
+    const host = new EventHost({ model, owner: { id: 'u' }, rules: () => [{ id: 'w', version: 1, description: 'wake', types: [def.type], verdict: Verdict.Wake }], coalesceMs: 10 });
+    await host.attach(client, { names: [def.type], mode: DeliveryMode.Webhook, webhook: { endpoint } });
     await ingest(7);
     await new Promise((r) => setTimeout(r, 50));
     await server.delivery!.idle();
@@ -200,7 +200,7 @@ describe('host webhook mode', () => {
     expect(host.turns).toHaveLength(1);
 
     const rotated = await host.rotateWebhookSecret();
-    expect(rotated.deliveryStatus).toBe('active');
+    expect(rotated.deliveryStatus).toBe(DeliveryStatus.Active);
     await ingest(8);
     await new Promise((r) => setTimeout(r, 50));
     await host.settle();

@@ -4,7 +4,7 @@
  * About 10% of events match a wake rule; everything else is stored by code with no model call.
  *   npx tsx scripts/bench-gates.ts
  */
-import { SchemaRegistry, type EventTypeDef } from '@agentevents/contract';
+import { SchemaRegistry, type EventTypeDef, Verdict, Autonomy, FilterLanguage } from '@agentevents/contract';
 import { GatePipeline, MemoryRuntimeState, VirtualClock, emergencyStopGate, expiryGate, loopGate, provenanceGate, quietGate, ruleGate, semanticDedupGate, type Rule } from '@agentevents/core';
 import { makeEvent } from '@agentevents/testkit';
 
@@ -20,15 +20,15 @@ const EVENTS = 20_000;
 const rules: Rule[] = Array.from({ length: RULES }, (_, i) => ({
   id: `r${i}`, version: 1, priority: i, description: `rule ${i}`, types: [def.type],
   // Rule 0 wakes on prod with value >= 90 (~10% of events); the rest match services that never occur.
-  filter: { language: 'eb-pattern', expression: i === 0 ? { 'data.env': ['prod'], 'data.value': [{ numeric: ['>=', 90] }] } : { 'data.service': [`never-${i}`] } },
-  verdict: i === 0 ? 'wake' : 'store',
+  filter: { language: FilterLanguage.EbPattern, expression: i === 0 ? { 'data.env': ['prod'], 'data.value': [{ numeric: ['>=', 90] }] } : { 'data.service': [`never-${i}`] } },
+  verdict: i === 0 ? Verdict.Wake : Verdict.Store,
 }));
 const state = new MemoryRuntimeState();
 const clock = new VirtualClock(Date.parse('2026-11-02T10:00:00Z'));
 const pipeline = new GatePipeline(
   [provenanceGate(), expiryGate({ stalenessMs: 3_600_000 }), loopGate({ causedByUs: () => false }), quietGate(), semanticDedupGate({ windowMs: 600_000 }), emergencyStopGate({ state: () => 'running' })],
   () => [ruleGate(() => rules)],
-  { defaultVerdict: 'store', defaultAutonomy: 'investigate' },
+  { defaultVerdict: Verdict.Store, defaultAutonomy: Autonomy.Investigate },
 );
 
 const events = Array.from({ length: EVENTS }, (_, i) => makeEvent(def, { service: `svc-${i % 50}`, env: 'prod', value: i % 100 }, { source: `b${i}`, time: '2026-11-02T10:00:00.000Z', receivedat: '2026-11-02T10:00:00.000Z' }));
@@ -38,7 +38,7 @@ for (const event of events) {
   const t0 = performance.now();
   const d = await pipeline.decide({ event, def, clock, state });
   times.push(performance.now() - t0);
-  if (d.verdict === 'wake') wakes++;
+  if (d.verdict === Verdict.Wake) wakes++;
 }
 times.sort((a, b) => a - b);
 const q = (p: number) => times[Math.floor(p * (times.length - 1))]!.toFixed(3);

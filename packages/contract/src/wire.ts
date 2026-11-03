@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { EventEnvelope } from './envelope';
 import { EXT } from './ns';
+import { DeliveryMode, DeliveryStatus } from './vocab';
 import type { FilterSpec } from './filter';
 
 /**
@@ -77,7 +78,7 @@ export const EventTypeEntry = z
     title: z.string().optional(),
     inputSchema: z.record(z.string(), z.unknown()),
     payloadSchema: z.record(z.string(), z.unknown()),
-    delivery: z.array(z.enum(['poll', 'stream', 'webhook'])),
+    delivery: z.array(z.enum(DeliveryMode)),
     _meta: z.record(z.string(), z.unknown()).optional(),
   })
   .passthrough();
@@ -116,7 +117,6 @@ export const filterFromMeta = (meta: unknown): FilterSpec | undefined =>
 
 export const WEBHOOK_METHODS = { subscribe: 'events/subscribe', unsubscribe: 'events/unsubscribe' } as const;
 
-export const DeliveryStatus = z.enum(['active', 'failing', 'failed', 'expired']);
 export const LastError = z.object({
   category: z.enum(['challenge_failed', 'url_rejected', 'delivery_failed', 'redirect', 'timeout', 'expired']),
   at: z.string(),
@@ -149,7 +149,7 @@ export const SubscribeResult = z
     ttlMs: z.number().int(),
     /** Advisory wall-clock time to refresh by. */
     refreshBefore: z.string(),
-    deliveryStatus: DeliveryStatus,
+    deliveryStatus: z.enum(DeliveryStatus),
     lastError: LastError.optional(),
     cursor: z.string(),
   })

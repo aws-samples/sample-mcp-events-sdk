@@ -1,20 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  SchemaRegistry,
-  deterministicId,
-  escapeJsonForPrompt,
-  evaluateFilter,
-  maskForRender,
-  redactForPersist,
-  renderEvent,
-  runMapping,
-  runVectors,
-  validateFilter,
-  webhooks,
-  type EventEnvelope,
-  type EventTypeDef,
-  type Mapping,
-} from '@agentevents/contract';
+import { SchemaRegistry, deterministicId, escapeJsonForPrompt, evaluateFilter, maskForRender, redactForPersist, renderEvent, runMapping, runVectors, validateFilter, webhooks, type EventEnvelope, type EventTypeDef, type Mapping, MaskMode, Provenance, Sensitivity, FilterLanguage } from '@agentevents/contract';
 
 // Credential-shaped test value, assembled at runtime so no key-like literal exists in source.
 const FAKE_KEY_ID = ['AK', 'IA', 'Z'.repeat(16)].join('');
@@ -32,8 +17,8 @@ const def: EventTypeDef = {
       state: { type: 'string', enum: ['ALARM', 'OK'], 'x-event': { filterable: true, enumClosed: true } },
       value: { type: 'number', 'x-event': { filterable: true } },
       description: { type: 'string', 'x-event': { untrusted: true } },
-      owner: { type: 'string', 'x-event': { sensitivity: 'pii', mask: 'partial' } },
-      token: { type: 'string', 'x-event': { sensitivity: 'secret' } },
+      owner: { type: 'string', 'x-event': { sensitivity: Sensitivity.Pii, mask: MaskMode.Partial } },
+      token: { type: 'string', 'x-event': { sensitivity: Sensitivity.Secret } },
     },
   },
 };
@@ -52,7 +37,7 @@ const ev = (data: Record<string, unknown>): EventEnvelope => ({
   time: '2026-11-02T10:00:00Z',
   receivedat: '2026-11-02T10:00:01Z',
   dataschema: def.dataschema,
-  provenance: 'live',
+  provenance: Provenance.Live,
   untrustedfields: ['data.description'],
   data,
 });
@@ -116,7 +101,7 @@ describe('filters', () => {
     const r = registry();
     const bad = validateFilter(
       {
-        language: 'eb-pattern',
+        language: FilterLanguage.EbPattern,
         expression: {
           'data.nmae': ['cpu'],
           'data.description': ['x'],
@@ -141,7 +126,7 @@ describe('filters', () => {
   it('computes features and evaluates with firstFailingPath', async () => {
     const r = registry();
     const spec = {
-      language: 'eb-pattern' as const,
+      language: FilterLanguage.EbPattern,
       expression: { 'data.state': ['ALARM'], 'data.value': [{ numeric: ['>=', 90] }] },
     };
     expect(validateFilter(spec, r, [def.type])).toEqual({ ok: true, features: ['eb-pattern', 'equals', 'numeric'] });
@@ -154,9 +139,9 @@ describe('filters', () => {
 
   it('type-checks and evaluates jsonata filters', async () => {
     const r = registry();
-    expect(validateFilter({ language: 'jsonata', expression: 'data.value > 90' }, r, [def.type]).ok).toBe(true);
-    expect(validateFilter({ language: 'jsonata', expression: 'data.owner = "x"' }, r, [def.type]).ok).toBe(false);
-    expect((await evaluateFilter({ language: 'jsonata', expression: 'data.value > 90' }, ev({ value: 91 }))).match).toBe(
+    expect(validateFilter({ language: FilterLanguage.Jsonata, expression: 'data.value > 90' }, r, [def.type]).ok).toBe(true);
+    expect(validateFilter({ language: FilterLanguage.Jsonata, expression: 'data.owner = "x"' }, r, [def.type]).ok).toBe(false);
+    expect((await evaluateFilter({ language: FilterLanguage.Jsonata, expression: 'data.value > 90' }, ev({ value: 91 }))).match).toBe(
       true,
     );
   });
@@ -196,7 +181,7 @@ describe('mappings', () => {
     upstreamId: 'eventId',
     sourceUri: '"test.example.com/" & account',
     transform: {
-      language: 'jsonata',
+      language: FilterLanguage.Jsonata,
       expression: '{ "time": at, "subject": "alarm/" & name, "actor": { "kind": "service", "principal": by }, "data": { "name": name, "state": state } }',
     },
     vectors: [
@@ -214,7 +199,7 @@ describe('mappings', () => {
 
   it('builds a deterministic envelope; tenant from context; platform actor detection', async () => {
     const raw = { eventId: 'e1', account: '1', at: '2026-11-02T10:00:00Z', name: 'cpu', state: 'ALARM', by: 'platform-role', tenantid: 'evil' };
-    const ctx = { tenantid: 't1', receivedat: '2026-11-02T10:00:02Z', provenance: 'live' as const, platformPrincipals: ['platform-role'] };
+    const ctx = { tenantid: 't1', receivedat: '2026-11-02T10:00:02Z', provenance: Provenance.Live, platformPrincipals: ['platform-role'] };
     const a = await runMapping(mapping, raw, ctx, registry());
     const b = await runMapping(mapping, raw, ctx, registry());
     expect(a.id).toBe(b.id);

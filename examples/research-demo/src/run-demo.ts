@@ -1,5 +1,6 @@
 import { RESEARCHER, startLab } from './app';
 
+import { Verdict } from '@agentevents/contract';
 const line = (s = '') => console.log(s);
 const scene = (n: number, t: string) => line(`\n━━ ${n}. ${t} ${'━'.repeat(Math.max(0, 70 - t.length))}`);
 
@@ -30,7 +31,7 @@ async function main(): Promise<void> {
   const verdicts = app.host.metrics.verdicts;
   const l3 = app.decisions.all().filter((d) => d.code === 'DEDUPED_L3').length;
   line(`   host verdicts: ${JSON.stringify(verdicts)} (near-duplicates merged: ${l3})`);
-  const passed = verdicts['wake'] ?? 0;
+  const passed = verdicts[Verdict.Wake] ?? 0;
   line(`   ${passed} of ${app.host.metrics.events} events passed the gates (${((passed / app.host.metrics.events) * 100).toFixed(2)}%), coalesced into ${app.host.metrics.turns} model turns`);
 
   scene(2, 'One thread per study, building context turn by turn');

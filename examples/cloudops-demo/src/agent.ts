@@ -1,5 +1,6 @@
 import { scriptedModel, type Model } from '@agentevents/host';
 
+import { Severity } from '@agentevents/contract';
 interface RenderedEvent {
   data: Record<string, unknown>;
   situation?: { transition: string; severity: string; occurrences: { count: number } };
@@ -66,7 +67,7 @@ export const scriptedInvestigator: Model = scriptedModel('scripted-investigator'
     summary: `${alarm} on ${service}: ${healthy ? 'service healthy, likely transient' : 'service unhealthy'}`,
     cause: healthy ? 'No unhealthy replicas found.' : 'Unhealthy replicas after the last deploy.',
     evidence,
-    impact: ev.situation?.severity === 'critical' || ev.situation?.severity === 'high' ? 'Customer-facing latency.' : 'Limited.',
+    impact: ev.situation?.severity === Severity.Critical || ev.situation?.severity === Severity.High ? 'Customer-facing latency.' : 'Limited.',
     nextStep: proposed ? 'Approve the proposed rolling restart.' : 'Keep watching.',
   });
 });

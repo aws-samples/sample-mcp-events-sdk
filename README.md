@@ -94,17 +94,22 @@ const host = new EventHost({ model, owner, rules: () => rules.live(), decisions 
 await host.attach(opsClient, { names: [alarmSituation.type], mode: 'stream' });
 ```
 
-A rule is data, not a prompt:
+A rule is data, not a prompt. The shared vocabularies (`Verdict`, `Autonomy`, `Severity`, `Transition`,
+`FilterLanguage` and others) are enum objects, so code never spells their values as string literals:
 
 ```ts
-{
+import { Autonomy, FilterLanguage, Severity, Transition, Verdict } from '@agentevents/contract';
+
+const rule: Rule = {
   id: 'prod-high-propose', version: 1, priority: 20,
   types: ['com.example.ops.alarm.v1'],
-  filter: { language: 'eb-pattern', expression: {
-    'data.env': ['prod'], 'situation.transition': ['open'], 'situation.severity': ['high', 'critical'] } },
-  verdict: 'wake',        // the model runs
-  autonomy: 'propose',    // it may propose a fix; a human approves
-}
+  filter: { language: FilterLanguage.EbPattern, expression: {
+    'data.env': ['prod'],
+    'situation.transition': [Transition.Open],
+    'situation.severity': [Severity.High, Severity.Critical] } },
+  verdict: Verdict.Wake,        // the model runs
+  autonomy: Autonomy.Propose,   // it may propose a fix; a human approves
+};
 ```
 
 ## Quick start

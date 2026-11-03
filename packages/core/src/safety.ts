@@ -1,17 +1,19 @@
 import type { EventEnvelope } from '@agentevents/contract';
 import type { Gate } from './gates';
 
+import { Autonomy, Provenance, Verdict } from '@agentevents/contract';
+import { GateStage } from './gates';
 /** Spec E3 §4.2 step 2: mandatory safety gates. Rules cannot disable these. */
 
 export function provenanceGate(): Gate {
   return {
     id: 'safety.provenance',
     version: '1',
-    stage: 'safety',
+    stage: GateStage.Safety,
     evaluate: ({ event }) =>
-      event.provenance === 'live' || event.provenance === 'redrive'
+      event.provenance === Provenance.Live || event.provenance === Provenance.Redrive
         ? undefined
-        : { verdict: 'store', code: 'NOT_LIVE', reason: `provenance ${event.provenance} never wakes or decides` },
+        : { verdict: Verdict.Store, code: 'NOT_LIVE', reason: `provenance ${event.provenance} never wakes or decides` },
   };
 }
 
@@ -19,15 +21,15 @@ export function expiryGate(opts: { stalenessMs: number }): Gate {
   return {
     id: 'safety.expiry',
     version: '1',
-    stage: 'safety',
+    stage: GateStage.Safety,
     evaluate: ({ event, clock }) => {
       const now = clock.now();
       if (event.expiresat && Date.parse(event.expiresat) <= now) {
-        return { verdict: 'store', code: 'EXPIRED', reason: `expired at ${event.expiresat}` };
+        return { verdict: Verdict.Store, code: 'EXPIRED', reason: `expired at ${event.expiresat}` };
       }
       const lag = now - Date.parse(event.time);
       if (lag > opts.stalenessMs) {
-        return { verdict: 'store', code: 'EXPIRED', reason: `arrived ${Math.round(lag / 1000)}s after it happened` };
+        return { verdict: Verdict.Store, code: 'EXPIRED', reason: `arrived ${Math.round(lag / 1000)}s after it happened` };
       }
       return undefined;
     },
@@ -47,17 +49,17 @@ export function loopGate(opts: LoopGateOptions): Gate {
   return {
     id: 'safety.loop',
     version: '1',
-    stage: 'safety',
+    stage: GateStage.Safety,
     evaluate: ({ event }) => {
       if (event.actor?.kind === 'platform') {
-        return { verdict: 'store', code: 'LOOP', reason: `caused by platform principal ${event.actor.principal ?? ''}`.trim() };
+        return { verdict: Verdict.Store, code: 'LOOP', reason: `caused by platform principal ${event.actor.principal ?? ''}`.trim() };
       }
       if (event.causationid && opts.causedByUs(event.causationid)) {
-        return { verdict: 'store', code: 'LOOP', reason: `caused by our action ${event.causationid}` };
+        return { verdict: Verdict.Store, code: 'LOOP', reason: `caused by our action ${event.causationid}` };
       }
       const max = opts.maxActionsPerCorrelation;
       if (max !== undefined && event.correlationid && (opts.actionsInCorrelation?.(event.correlationid) ?? 0) >= max) {
-        return { verdict: 'store', code: 'LOOP', reason: `correlation ${event.correlationid} reached ${max} agent actions` };
+        return { verdict: Verdict.Store, code: 'LOOP', reason: `correlation ${event.correlationid} reached ${max} agent actions` };
       }
       return undefined;
     },
@@ -69,11 +71,11 @@ export function quietGate(): Gate {
   return {
     id: 'safety.quiet',
     version: '1',
-    stage: 'safety',
+    stage: GateStage.Safety,
     evaluate: ({ event }) => {
       const flags = event.situation?.flags ?? [];
       const quiet = flags.filter((f) => f === 'suppressed' || f === 'storm' || f === 'flapping');
-      return quiet.length ? { verdict: 'store', code: 'QUIET', reason: `situation is ${quiet.join(', ')}` } : undefined;
+      return quiet.length ? { verdict: Verdict.Store, code: 'QUIET', reason: `situation is ${quiet.join(', ')}` } : undefined;
     },
   };
 }
@@ -88,7 +90,7 @@ export function emergencyStopGate(stop: EmergencyStop): Gate {
   return {
     id: 'safety.emergency-stop',
     version: '1',
-    stage: 'safety',
+    stage: GateStage.Safety,
     evaluate: async ({ event }) => {
       let s: 'running' | 'stopped' | undefined;
       try {
@@ -96,7 +98,7 @@ export function emergencyStopGate(stop: EmergencyStop): Gate {
       } catch {
         s = undefined;
       }
-      return s === 'running' ? undefined : { autonomyCap: 'notify', reason: s ? 'emergency stop active' : 'emergency stop state unreadable (fail closed)' };
+      return s === 'running' ? undefined : { autonomyCap: Autonomy.Notify, reason: s ? 'emergency stop active' : 'emergency stop state unreadable (fail closed)' };
     },
   };
 }
@@ -106,14 +108,14 @@ export function semanticDedupGate(opts: { windowMs: number }): Gate {
   return {
     id: 'safety.dedup-l3',
     version: '1',
-    stage: 'safety',
+    stage: GateStage.Safety,
     evaluate: async ({ event, state, clock }) => {
       if (!event.dedupkey) return undefined;
       return (await state.seen('L3', `${event.tenantid ?? ''}\u0000${event.dedupkey}`, opts.windowMs, clock.now()))
-        ? { verdict: 'drop', code: 'DEDUPED_L3', reason: `dedupkey ${event.dedupkey} seen within window` }
+        ? { verdict: Verdict.Drop, code: 'DEDUPED_L3', reason: `dedupkey ${event.dedupkey} seen within window` }
         : undefined;
     },
   };
 }
 
-export const isLive = (ev: EventEnvelope): boolean => ev.provenance === 'live' || ev.provenance === 'redrive';
+export const isLive = (ev: EventEnvelope): boolean => ev.provenance === Provenance.Live || ev.provenance === Provenance.Redrive;

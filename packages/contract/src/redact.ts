@@ -1,6 +1,7 @@
 import { sha256, type EventEnvelope } from './envelope';
 import type { JsonSchema, SchemaRegistry } from './registry';
 
+import { Sensitivity } from './vocab';
 export const REDACTOR_VERSION = 'redact/1';
 
 const CREDENTIAL_SHAPES: readonly RegExp[] = [
@@ -36,7 +37,7 @@ export function redactForPersist(ev: EventEnvelope, registry: SchemaRegistry): R
 }
 
 function walkPersist(value: unknown, schema: JsonSchema, path: string, removed: string[]): unknown {
-  if (schema['x-event']?.sensitivity === 'secret') {
+  if (schema['x-event']?.sensitivity === Sensitivity.Secret) {
     removed.push(path);
     return undefined;
   }
@@ -77,8 +78,8 @@ export function maskForRender(ev: EventEnvelope, registry: SchemaRegistry): Even
 
 function walkMask(value: unknown, schema: JsonSchema): unknown {
   const ann = schema['x-event'];
-  if (ann?.sensitivity === 'secret') return undefined;
-  if ((ann?.sensitivity === 'pii' || ann?.sensitivity === 'sensitive') && value !== undefined) {
+  if (ann?.sensitivity === Sensitivity.Secret) return undefined;
+  if ((ann?.sensitivity === Sensitivity.Pii || ann?.sensitivity === Sensitivity.Sensitive) && value !== undefined) {
     const s = typeof value === 'string' ? value : JSON.stringify(value);
     switch (ann.mask ?? 'full') {
       case 'partial':

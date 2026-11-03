@@ -9,6 +9,9 @@ import { documentClient, dynamoStores, ensureTable } from '@agentevents/store-dy
 import { OWNER, alarmPayload, sendWebhook, startApp, type AppStores } from '../src/app';
 import { scriptedInvestigator } from '../src/agent';
 
+import { Severity, Verdict, FilterLanguage } from '@agentevents/contract';
+import { ChangeOp, DeployMode } from '@agentevents/rules';
+import { ProposalDecision } from '@agentevents/actions';
 let server: Server;
 let client: DynamoDBClient;
 
@@ -46,18 +49,18 @@ it('runs the governed loop on DynamoDB and keeps state across a restart', async 
   await settle(a);
   expect(a.host.turns).toHaveLength(1);
   const p = proposals[0]!;
-  expect((await a.host.decide(p.proposalId, p.fingerprint, 'approve', OWNER.id)).ok).toBe(true);
+  expect((await a.host.decide(p.proposalId, p.fingerprint, ProposalDecision.Approve, OWNER.id)).ok).toBe(true);
   await settle(a);
   const decisionsA = await a.allDecisions();
   expect(decisionsA.at(-1)).toMatchObject({ code: 'LOOP' });
 
   const change = (await a.rulesClient.callTool({
     name: 'rules_propose',
-    arguments: { op: 'upsert', request: 'digest medium prod alarms', rule: { id: 'prod-medium-digest', priority: 15, description: 'digest medium', types: ['com.example.ops.alarm.v1'], filter: { language: 'eb-pattern', expression: { 'situation.severity': ['medium'] } }, verdict: 'digest' } },
+    arguments: { op: ChangeOp.Upsert, request: 'digest medium prod alarms', rule: { id: 'prod-medium-digest', priority: 15, description: 'digest medium', types: ['com.example.ops.alarm.v1'], filter: { language: FilterLanguage.EbPattern, expression: { 'situation.severity': [Severity.Medium] } }, verdict: Verdict.Digest } },
   })).structuredContent as { changeId: string; fingerprint: string };
   await a.rulesClient.callTool({ name: 'rules_backtest', arguments: { changeId: change.changeId } });
   expect((await a.rulesClient.callTool({ name: 'rules_approve', arguments: change })).isError).toBeFalsy();
-  await a.rulesClient.callTool({ name: 'rules_deploy', arguments: { changeId: change.changeId, mode: 'live' } });
+  await a.rulesClient.callTool({ name: 'rules_deploy', arguments: { changeId: change.changeId, mode: DeployMode.Live } });
   const logged = (await readAll(stores().serverLog!)).length;
   await a.close();
 
@@ -66,10 +69,10 @@ it('runs the governed loop on DynamoDB and keeps state across a restart', async 
   expect(b.rules.live().some((r) => r.id === 'prod-medium-digest')).toBe(true); // rule store survived
   expect((await sendWebhook(b, first, { id: 'redelivered-after-restart' })).body).toMatchObject({ code: 'DEDUPED_L1' }); // dedup survived
   expect((await readAll(stores().serverLog!)).length).toBe(logged); // event log survived, nothing re-appended
-  await sendWebhook(b, alarmPayload({ service: 'cart', severity: 'medium', time: next() }));
+  await sendWebhook(b, alarmPayload({ service: 'cart', severity: Severity.Medium, time: next() }));
   await settle(b);
   const last = (await b.allDecisions()).filter((d) => d.subject === 'service/cart').at(-1);
-  expect(last).toMatchObject({ verdict: 'digest', ruleId: 'prod-medium-digest' });
+  expect(last).toMatchObject({ verdict: Verdict.Digest, ruleId: 'prod-medium-digest' });
   expect((await b.allDecisions()).length).toBeGreaterThan(decisionsA.length); // decision records survived
   await b.close();
 });

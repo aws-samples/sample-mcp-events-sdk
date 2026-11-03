@@ -469,6 +469,13 @@ The rule engine is an MCP server. Its tools:
 
 TypeScript first; Python second. Each half is a thin layer over the official MCP SDK.
 
+Every closed vocabulary in this spec (verdicts, autonomy levels, provenance, situation transitions and
+severities, mid-turn policies, filter languages, delivery modes and statuses, reversibility tiers, proposal
+decisions, rule states and risk tiers) is exposed as an enum object, for example `Verdict.Wake` and
+`Autonomy.Propose`. Code uses the members, never string literals. Each enum also exports a type of the same
+name, the union of its values, so data parsed from the wire or from stored rules still type-checks. The
+values are the wire format shown in this document and never change.
+
 ### 8.1 Packages
 
 | Package | Contents |

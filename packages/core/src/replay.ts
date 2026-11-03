@@ -1,7 +1,8 @@
 import type { EventEnvelope, SchemaRegistry } from '@agentevents/contract';
-import type { Decision, GatePipeline, Verdict } from './gates';
+import type { Decision, GatePipeline } from './gates';
 import { MemoryRuntimeState, VirtualClock, type Clock, type RuntimeState } from './ports';
 
+import { Provenance, Verdict } from '@agentevents/contract';
 export type PipelineFactory = (deps: { clock: Clock; state: RuntimeState }) => GatePipeline;
 
 export interface ImpactReport {
@@ -36,7 +37,7 @@ export async function replay(
   const pipeline = factory({ clock, state });
   const decisions: Decision[] = [];
   for (const raw of slice) {
-    const event = opts.asLive ? { ...raw, provenance: 'live' as const } : raw;
+    const event = opts.asLive ? { ...raw, provenance: Provenance.Live } : raw;
     clock.set(Date.parse(event.receivedat));
     decisions.push(await pipeline.decide({ event, def: registry.get(event.type), clock, state }));
   }
@@ -64,7 +65,7 @@ export interface ImpactDiff {
   newlyWoken: { eventId: string; subject: string | undefined; from: Verdict; to: Verdict }[];
 }
 
-const LOUD: ReadonlySet<Verdict> = new Set(['wake', 'escalate', 'decide']);
+const LOUD: ReadonlySet<Verdict> = new Set([Verdict.Wake, Verdict.Escalate, Verdict.Decide]);
 
 export function diffDecisions(live: readonly Decision[], proposed: readonly Decision[]): ImpactDiff {
   const out: ImpactDiff = { changed: 0, transitions: {}, newlySilenced: [], newlyWoken: [] };

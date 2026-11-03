@@ -3,9 +3,9 @@ import type { AddressInfo } from 'node:net';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import dynalite from 'dynalite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { SchemaRegistry, type EventTypeDef } from '@agentevents/contract';
+import { SchemaRegistry, type EventTypeDef, Autonomy, Verdict, FilterLanguage } from '@agentevents/contract';
 import { MemoryDecisionStore, MemoryEventLog, MemoryRuntimeState, MemoryThreadMemory, readAll, type Decision, type DecisionStore, type EventLog, type RuntimeState, type ThreadMemory } from '@agentevents/core';
-import { MemoryRuleLog, RuleStore, type RuleLog } from '@agentevents/rules';
+import { MemoryRuleLog, RuleStore, type RuleLog, ChangeOp, DeployMode, RequestOrigin } from '@agentevents/rules';
 import { DynamoDecisionStore, DynamoEventLog, DynamoRuleLog, DynamoRuntimeState, DynamoThreadMemory, documentClient, ensureTable } from '@agentevents/store-dynamodb';
 import { makeEvent } from '@agentevents/testkit';
 
@@ -79,12 +79,12 @@ describe.each(impls)('$label stores', (impl) => {
   it('decision records: by event and most recent first', async () => {
     const store = impl.decisions();
     const id = name();
-    const base: Decision = { eventId: id, type: def.type, subject: 's', verdict: 'store', autonomy: 'notify', downgrades: [], code: 'STORED', reason: 'r', gates: [], decidedAt: Date.now() };
+    const base: Decision = { eventId: id, type: def.type, subject: 's', verdict: Verdict.Store, autonomy: Autonomy.Notify, downgrades: [], code: 'STORED', reason: 'r', gates: [], decidedAt: Date.now() };
     await store.put(base);
-    await store.put({ ...base, verdict: 'wake', code: 'WOKEN', decidedAt: base.decidedAt + 1 });
-    expect((await store.forEvent(id)).map((d) => d.verdict).sort()).toEqual(['store', 'wake']);
+    await store.put({ ...base, verdict: Verdict.Wake, code: 'WOKEN', decidedAt: base.decidedAt + 1 });
+    expect((await store.forEvent(id)).map((d) => d.verdict).sort()).toEqual([Verdict.Store, Verdict.Wake]);
     const recent = await store.recent(2);
-    expect(recent[0]?.verdict).toBe('wake');
+    expect(recent[0]?.verdict).toBe(Verdict.Wake);
   });
 
   it('thread memory: appends and returns the most recent entries oldest first', async () => {
@@ -100,12 +100,12 @@ describe.each(impls)('$label stores', (impl) => {
     reg.register(def);
     const log = impl.rules();
     const a = await RuleStore.open(reg, { log });
-    await a.seed({ id: 'r1', version: 1, description: 'wake', types: [def.type], verdict: 'wake' }, 'bootstrap');
-    const p = await a.propose({ op: 'upsert', rule: { id: 'r2', description: 'digest big', types: [def.type], filter: { language: 'eb-pattern', expression: { 'data.n': [{ numeric: ['>', 5] }] } }, verdict: 'digest' }, request: 'digest big ones' }, { id: 'u', roles: ['rule-owner'], origin: 'user' });
+    await a.seed({ id: 'r1', version: 1, description: 'wake', types: [def.type], verdict: Verdict.Wake }, 'bootstrap');
+    const p = await a.propose({ op: ChangeOp.Upsert, rule: { id: 'r2', description: 'digest big', types: [def.type], filter: { language: FilterLanguage.EbPattern, expression: { 'data.n': [{ numeric: ['>', 5] }] } }, verdict: Verdict.Digest }, request: 'digest big ones' }, { id: 'u', roles: ['rule-owner'], origin: RequestOrigin.User });
     if (!p.ok) throw new Error(p.reason);
     await a.backtest(p.value.changeId, []);
-    await a.approve(p.value.changeId, p.value.fingerprint, { id: 'u', roles: ['rule-owner'], origin: 'user' });
-    await a.deploy(p.value.changeId, 'live');
+    await a.approve(p.value.changeId, p.value.fingerprint, { id: 'u', roles: ['rule-owner'], origin: RequestOrigin.User });
+    await a.deploy(p.value.changeId, DeployMode.Live);
     const b = await RuleStore.open(reg, { log });
     expect(b.live().map((r) => `${r.id}@${r.version}`).sort()).toEqual(['r1@1', 'r2@1']);
     expect(b.change(p.value.changeId)?.state).toBe('deployed');

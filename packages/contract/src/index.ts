@@ -1,4 +1,5 @@
 export * from './ns';
+export * from './vocab';
 export * from './envelope';
 export * from './registry';
 export * from './redact';

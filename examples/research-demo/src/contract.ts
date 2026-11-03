@@ -1,6 +1,7 @@
 import type { EventTypeDef, Mapping } from '@agentevents/contract';
 import type { Rule } from '@agentevents/core';
 
+import { Autonomy, MaskMode, MidTurn, Sensitivity, Verdict, FilterLanguage } from '@agentevents/contract';
 /** Published contract for the research example. Names and values are fictional. */
 const BASE = 'https://events.example.org/schemas/lab';
 
@@ -24,10 +25,10 @@ export const reading: EventTypeDef = {
       /** The instrument's own sample counter; a re-sent sample keeps it. */
       sample: { type: 'number' },
       note: { type: 'string', 'x-event': { untrusted: true } },
-      operator: { type: 'string', 'x-event': { sensitivity: 'pii', mask: 'hash' } },
+      operator: { type: 'string', 'x-event': { sensitivity: Sensitivity.Pii, mask: MaskMode.Hash } },
     },
   },
-  hints: { suggestedVerdict: 'store', midTurn: 'merge', coalesce: { by: ['subject'], windowSeconds: 1, max: 12 } },
+  hints: { suggestedVerdict: Verdict.Store, midTurn: MidTurn.Merge, coalesce: { by: ['subject'], windowSeconds: 1, max: 12 } },
 };
 
 export const paper: EventTypeDef = {
@@ -45,7 +46,7 @@ export const paper: EventTypeDef = {
       relevance: { type: 'number', 'x-event': { filterable: true } },
     },
   },
-  hints: { suggestedVerdict: 'store', midTurn: 'merge', coalesce: { by: ['subject'], windowSeconds: 1, max: 5 } },
+  hints: { suggestedVerdict: Verdict.Store, midTurn: MidTurn.Merge, coalesce: { by: ['subject'], windowSeconds: 1, max: 5 } },
 };
 
 export const instrumentMapping: Mapping = {
@@ -58,7 +59,7 @@ export const instrumentMapping: Mapping = {
   // Near-duplicates: an instrument re-sending a sample under a new reading id (layer 1 can't see it).
   dedupKey: { fields: ['data.study', 'data.sensor', 'data.sample'], windowSeconds: 600 },
   transform: {
-    language: 'jsonata',
+    language: FilterLanguage.Jsonata,
     expression: `{
       "time": at,
       "subject": "study/" & study,
@@ -89,7 +90,7 @@ export const paperMapping: Mapping = {
   upstreamId: 'doi',
   sourceUri: '"papers.example.org"',
   transform: {
-    language: 'jsonata',
+    language: FilterLanguage.Jsonata,
     expression: '{ "time": at, "subject": "study/" & study, "data": { "study": study, "doi": doi, "title": title, "relevance": relevance } }',
   },
   vectors: [
@@ -109,10 +110,10 @@ export const RULES: Rule[] = [
     priority: 10,
     description: 'Wake when one study sees 3+ readings at >= 3 sigma within 10 minutes',
     types: [reading.type],
-    filter: { language: 'eb-pattern', expression: { 'data.deviation': [{ numeric: ['>=', 3] }] } },
+    filter: { language: FilterLanguage.EbPattern, expression: { 'data.deviation': [{ numeric: ['>=', 3] }] } },
     window: { operator: 'threshold', count: 3, windowSeconds: 600, by: 'subject' },
-    verdict: 'wake',
-    autonomy: 'investigate',
+    verdict: Verdict.Wake,
+    autonomy: Autonomy.Investigate,
   },
   {
     id: 'relevant-paper',
@@ -120,9 +121,9 @@ export const RULES: Rule[] = [
     priority: 20,
     description: 'Wake for papers scored highly relevant to a study',
     types: [paper.type],
-    filter: { language: 'eb-pattern', expression: { 'data.relevance': [{ numeric: ['>=', 0.85] }] } },
-    verdict: 'wake',
-    autonomy: 'investigate',
+    filter: { language: FilterLanguage.EbPattern, expression: { 'data.relevance': [{ numeric: ['>=', 0.85] }] } },
+    verdict: Verdict.Wake,
+    autonomy: Autonomy.Investigate,
   },
 ];
 

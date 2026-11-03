@@ -1,10 +1,12 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { EXT, SPEC_VERSION, type EventEnvelope } from '@agentevents/contract';
+import { EXT, SPEC_VERSION, type EventEnvelope, Autonomy, Verdict } from '@agentevents/contract';
 import { TRACE, type DecisionStore, type Rule } from '@agentevents/core';
 import type { Principal, Result, RuleStore } from './store';
 
+import { ChangeOp, RequestOrigin, DeployMode } from './store';
+import { Tier } from '@agentevents/actions';
 export interface RulesServerOptions {
   store: RuleStore;
   /** Recent event history for backtests (read from the event log). */
@@ -32,8 +34,8 @@ const RuleInput = z.object({
   types: z.array(z.string()).min(1),
   filter: FilterSchema.optional(),
   window: z.object({ operator: z.literal('threshold'), count: z.number().int(), windowSeconds: z.number().int(), by: z.string() }).optional(),
-  verdict: z.enum(['drop', 'store', 'digest', 'wake', 'decide', 'escalate']),
-  autonomy: z.enum(['notify', 'investigate', 'propose', 'act']).optional(),
+  verdict: z.enum(Verdict),
+  autonomy: z.enum(Autonomy).optional(),
   mandatory: z.boolean().optional(),
   priority: z.number().int().optional(),
 });
@@ -45,7 +47,7 @@ const RuleInput = z.object({
 export function createRulesServer(opts: RulesServerOptions): McpServer {
   const mcp = new McpServer({ name: 'agentevents-rules', version: SPEC_VERSION }, { capabilities: { tools: {}, extensions: { [EXT.rules]: { version: SPEC_VERSION } } } });
   const { store } = opts;
-  const meta = { [EXT.actions]: { tier: 'safe' } };
+  const meta = { [EXT.actions]: { tier: Tier.Safe } };
 
   mcp.registerTool('rules_list', { description: 'List live and shadow rules with versions.', annotations: { readOnlyHint: true }, _meta: meta }, () =>
     json({ live: store.live(), shadow: store.shadow() }),
@@ -60,12 +62,12 @@ export function createRulesServer(opts: RulesServerOptions): McpServer {
     {
       description:
         'Propose a structured rule change. Translate the user request into a rule (never store prose). Attach the original request verbatim. Returns validation issues and the risk tier.',
-      inputSchema: { op: z.enum(['upsert', 'retire']), rule: RuleInput, request: z.string() },
-      _meta: { [EXT.actions]: { tier: 'reversible' } },
+      inputSchema: { op: z.enum(ChangeOp), rule: RuleInput, request: z.string() },
+      _meta: { [EXT.actions]: { tier: Tier.Reversible } },
     },
     async ({ op, rule, request }) => {
       const p = opts.principal();
-      if (p.origin === 'event') return json({ code: 'EVENT_ORIGIN', reason: 'rule changes must originate from a user request' }, true);
+      if (p.origin === RequestOrigin.Event) return json({ code: 'EVENT_ORIGIN', reason: 'rule changes must originate from a user request' }, true);
       return out(await store.propose({ op, rule: rule as Omit<Rule, 'version'>, request }, p));
     },
   );
@@ -82,28 +84,28 @@ export function createRulesServer(opts: RulesServerOptions): McpServer {
     ({ changeId }) => {
       const c = store.change(changeId);
       if (!c) return json({ code: 'NOT_FOUND' }, true);
-      return json({ live: store.live().find((r) => r.id === c.rule.id) ?? null, proposed: c.op === 'retire' ? null : c.rule, tier: c.tier, tierReasons: c.tierReasons });
+      return json({ live: store.live().find((r) => r.id === c.rule.id) ?? null, proposed: c.op === ChangeOp.Retire ? null : c.rule, tier: c.tier, tierReasons: c.tierReasons });
     },
   );
 
   mcp.registerTool(
     'rules_approve',
-    { description: 'Approve a change (permitted humans only; enforced by tier).', inputSchema: { changeId: z.string(), fingerprint: z.string() }, _meta: { [EXT.actions]: { tier: 'reversible' } } },
+    { description: 'Approve a change (permitted humans only; enforced by tier).', inputSchema: { changeId: z.string(), fingerprint: z.string() }, _meta: { [EXT.actions]: { tier: Tier.Reversible } } },
     async ({ changeId, fingerprint }) => out(await store.approve(changeId, fingerprint, opts.principal())),
   );
 
   mcp.registerTool(
     'rules_deploy',
-    { description: 'Deploy a change in shadow or live mode (atomic, versioned).', inputSchema: { changeId: z.string(), mode: z.enum(['shadow', 'live']) }, _meta: { [EXT.actions]: { tier: 'reversible' } } },
+    { description: 'Deploy a change in shadow or live mode (atomic, versioned).', inputSchema: { changeId: z.string(), mode: z.enum(DeployMode) }, _meta: { [EXT.actions]: { tier: Tier.Reversible } } },
     async ({ changeId, mode }) => {
-      if (opts.principal().origin === 'event') return json({ code: 'EVENT_ORIGIN' }, true);
+      if (opts.principal().origin === RequestOrigin.Event) return json({ code: 'EVENT_ORIGIN' }, true);
       return out(await store.deploy(changeId, mode));
     },
   );
 
   mcp.registerTool(
     'rules_rollback',
-    { description: 'Restore a previous rule version in one step.', inputSchema: { ruleId: z.string(), toVersion: z.number().int() }, _meta: { [EXT.actions]: { tier: 'reversible' } } },
+    { description: 'Restore a previous rule version in one step.', inputSchema: { ruleId: z.string(), toVersion: z.number().int() }, _meta: { [EXT.actions]: { tier: Tier.Reversible } } },
     async ({ ruleId, toVersion }) => out(await store.rollback(ruleId, toVersion, opts.principal())),
   );
 

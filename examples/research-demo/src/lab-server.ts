@@ -3,6 +3,7 @@ import { EXT } from '@agentevents/contract';
 import { EventServer } from '@agentevents/server';
 import { instrumentMapping, paper, paperMapping, reading } from './contract';
 
+import { Tier } from '@agentevents/actions';
 interface Point {
   study: string;
   sensor: string;
@@ -25,7 +26,7 @@ export function createLabServer(opts: { tenantid: string }) {
     points.push({ study: d.study, sensor: d.sensor, batch: d.batch, value: d.value, deviation: d.deviation, time: ev.time });
   });
 
-  const safe = { [EXT.actions]: { tier: 'safe' } };
+  const safe = { [EXT.actions]: { tier: Tier.Safe } };
   const mean = (xs: number[]): number => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 100) / 100 : 0);
 
   events.mcp.registerTool(

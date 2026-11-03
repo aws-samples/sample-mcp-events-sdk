@@ -1,13 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import {
-  deterministicId,
-  runVectors,
-  type EventEnvelope,
-  type EventTypeDef,
-  type JsonSchema,
-  type Mapping,
-  type MappedEvent,
-} from '@agentevents/contract';
+import { deterministicId, runVectors, type EventEnvelope, type EventTypeDef, type JsonSchema, type Mapping, type MappedEvent, Provenance } from '@agentevents/contract';
 
 /** Build a valid envelope with sensible defaults for tests and local emulation. */
 export function makeEvent(def: EventTypeDef, data: Record<string, unknown>, over: Partial<EventEnvelope> = {}): EventEnvelope {
@@ -20,7 +12,7 @@ export function makeEvent(def: EventTypeDef, data: Record<string, unknown>, over
     time,
     receivedat: time,
     dataschema: def.dataschema,
-    provenance: 'live',
+    provenance: Provenance.Live,
     untrustedfields: [],
     data,
     ...over,

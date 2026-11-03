@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { EXT } from '@agentevents/contract';
+import { EXT, Severity } from '@agentevents/contract';
 import type { EventLog, RuntimeState } from '@agentevents/core';
 import { EventServer } from '@agentevents/server';
-import { OutcomeUnknownError, WriteLedger, defineAction } from '@agentevents/actions';
+import { OutcomeUnknownError, WriteLedger, defineAction, Tier } from '@agentevents/actions';
 import { PLATFORM_PRINCIPAL, alarmSituation, alarmState, alarmStorm, monitoringMapping, situationConfig } from './contract';
 
 /** A fake fleet, so the example runs without cloud credentials. */
@@ -68,7 +68,7 @@ export function createOpsServer(opts: { tenantid: string; log?: EventLog; state?
   const emitMonitoring = (payload: Record<string, unknown>): Promise<unknown> =>
     events.ingestRaw(monitoringMapping.id, payload, { tenantid: opts.tenantid });
 
-  const safe = { [EXT.actions]: { tier: 'safe' } };
+  const safe = { [EXT.actions]: { tier: Tier.Safe } };
 
   events.mcp.registerTool(
     'describe_service',
@@ -105,7 +105,7 @@ export function createOpsServer(opts: { tenantid: string; log?: EventLog; state?
     'restart_service',
     {
       description: 'Rolling restart of a service. Reversible: replicas come back on the same version.',
-      tier: 'reversible',
+      tier: Tier.Reversible,
       targetArg: 'service',
       inputSchema: { service: z.string(), reason: z.string() },
     },
@@ -126,7 +126,7 @@ export function createOpsServer(opts: { tenantid: string; log?: EventLog; state?
           time: new Date().toISOString(),
           changedBy: PLATFORM_PRINCIPAL,
           causation: ctx.actionId,
-          alarm: { name, service, env: 'prod', state: 'OK', severity: 'high', metric: 'p99_latency_ms', value: 120, threshold: 1000, description: 'recovered after restart' },
+          alarm: { name, service, env: 'prod', state: 'OK', severity: Severity.High, metric: 'p99_latency_ms', value: 120, threshold: 1000, description: 'recovered after restart' },
         });
       }
       return { content: [{ type: 'text', text: JSON.stringify({ service, restarted: true, restarts: s.restarts }) }] };

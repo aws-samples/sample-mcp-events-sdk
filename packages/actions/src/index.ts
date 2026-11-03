@@ -4,10 +4,13 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { z } from 'zod';
 import { EXT, sha256 } from '@agentevents/contract';
 
+type ValueOf<T> = T[keyof T];
+
 /** Spec E4 §5.2 reversibility tiers. */
-export type Tier = 'safe' | 'reversible' | 'effort_to_reverse' | 'irreversible';
-export const UNATTENDED_TIERS: ReadonlySet<Tier> = new Set(['safe', 'reversible']);
-export const PROPOSABLE_TIERS: ReadonlySet<Tier> = new Set(['reversible', 'effort_to_reverse']);
+export const Tier = { Safe: 'safe', Reversible: 'reversible', EffortToReverse: 'effort_to_reverse', Irreversible: 'irreversible' } as const;
+export type Tier = ValueOf<typeof Tier>;
+export const UNATTENDED_TIERS: ReadonlySet<Tier> = new Set([Tier.Safe, Tier.Reversible]);
+export const PROPOSABLE_TIERS: ReadonlySet<Tier> = new Set([Tier.Reversible, Tier.EffortToReverse]);
 
 export interface ActionMeta {
   tier: Tier;
@@ -25,7 +28,15 @@ export function idempotencyKey(parts: { tenant?: string; trigger: string; tool: 
   return `idem:${sha256([parts.tenant ?? '', parts.trigger, parts.tool, parts.target, parts.intent ?? ''].join('\u0000'))}`;
 }
 
-export type WriteState = 'started' | 'applied' | 'failed' | 'refused' | 'outcome_unknown';
+export const WriteState = { Started: 'started', Applied: 'applied', Failed: 'failed', Refused: 'refused', OutcomeUnknown: 'outcome_unknown' } as const;
+export type WriteState = ValueOf<typeof WriteState>;
+
+export const ProposalState = { Pending: 'pending', Approved: 'approved', Declined: 'declined', Expired: 'expired', Stale: 'stale' } as const;
+export type ProposalState = ValueOf<typeof ProposalState>;
+
+/** A human's decision on a proposal. */
+export const ProposalDecision = { Approve: 'approve', Decline: 'decline' } as const;
+export type ProposalDecision = ValueOf<typeof ProposalDecision>;
 
 interface WriteRecord {
   key: string;
@@ -50,12 +61,12 @@ export class WriteLedger {
 
   begin(key: string, tool: string, target: string): BeginResult {
     const existing = this.byKey.get(key);
-    if (existing?.state === 'applied' && existing.result) return { kind: 'replay', result: existing.result };
-    if (existing?.state === 'started') return { kind: 'blocked', reason: 'a write with this idempotency key is in progress' };
-    const unknown = [...this.byKey.values()].find((r) => r.target === target && r.state === 'outcome_unknown');
+    if (existing?.state === WriteState.Applied && existing.result) return { kind: 'replay', result: existing.result };
+    if (existing?.state === WriteState.Started) return { kind: 'blocked', reason: 'a write with this idempotency key is in progress' };
+    const unknown = [...this.byKey.values()].find((r) => r.target === target && r.state === WriteState.OutcomeUnknown);
     if (unknown) return { kind: 'blocked', reason: `target ${target} has a write with unknown outcome (${unknown.actionId}); reconcile first` };
     const actionId = `act_${randomUUID()}`;
-    this.byKey.set(key, { key, tool, target, state: 'started', actionId });
+    this.byKey.set(key, { key, tool, target, state: WriteState.Started, actionId });
     return { kind: 'new', actionId };
   }
 
@@ -66,8 +77,8 @@ export class WriteLedger {
     if (result) r.result = result;
   }
 
-  reconcile(target: string, state: 'applied' | 'failed'): void {
-    for (const r of this.byKey.values()) if (r.target === target && r.state === 'outcome_unknown') r.state = state;
+  reconcile(target: string, state: typeof WriteState.Applied | typeof WriteState.Failed): void {
+    for (const r of this.byKey.values()) if (r.target === target && r.state === WriteState.OutcomeUnknown) r.state = state;
   }
 
   records(): readonly WriteRecord[] {
@@ -105,7 +116,7 @@ export function defineAction<Shape extends z.ZodRawShape>(
   opts: DefineActionOptions<Shape>,
   handler: (args: z.infer<z.ZodObject<Shape>>, ctx: ActionContext) => Promise<CallToolResult>,
 ): void {
-  if (opts.tier === 'irreversible') {
+  if (opts.tier === Tier.Irreversible) {
     // Allowed to exist, but hosts will never run or propose it unattended (spec E4 §5.2).
   }
   mcp.registerTool(
@@ -114,7 +125,7 @@ export function defineAction<Shape extends z.ZodRawShape>(
       ...(opts.title ? { title: opts.title } : {}),
       description: opts.description,
       inputSchema: opts.inputSchema,
-      annotations: { readOnlyHint: false, destructiveHint: opts.tier !== 'reversible', idempotentHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: opts.tier !== Tier.Reversible, idempotentHint: true },
       _meta: { [EXT.actions]: { tier: opts.tier, requiresIdempotencyKey: true, targetArg: opts.targetArg } },
     },
     (async (args: z.infer<z.ZodObject<Shape>>, extra: { _meta?: Record<string, unknown> }) => {
@@ -132,7 +143,7 @@ export function defineAction<Shape extends z.ZodRawShape>(
         return withId;
       } catch (e) {
         const unknown = e instanceof OutcomeUnknownError;
-        ledger.finish(key, unknown ? 'outcome_unknown' : 'failed');
+        ledger.finish(key, unknown ? WriteState.OutcomeUnknown : WriteState.Failed);
         return errorResult(unknown ? `outcome unknown: ${(e as Error).message}` : `failed: ${(e as Error).message}`);
       }
     }) as never,
@@ -156,7 +167,7 @@ export interface Proposal {
   reason: string;
   /** The event and flow that triggered the proposal (for causation on execution). */
   trigger?: { eventId: string; correlationId?: string };
-  state: 'pending' | 'approved' | 'declined' | 'expired' | 'stale';
+  state: ProposalState;
   decisionKey?: string;
 }
 
@@ -192,7 +203,7 @@ export class ProposalStore {
       expiresAt: this.now() + this.ttlMs,
       tainted: p.tainted,
       reason: p.reason,
-      state: 'pending',
+      state: ProposalState.Pending,
       ...(p.situationKey ? { situationKey: p.situationKey } : {}),
       ...(p.trigger ? { trigger: p.trigger } : {}),
     };
@@ -200,28 +211,28 @@ export class ProposalStore {
     return proposal;
   }
 
-  decide(d: { proposalId: string; fingerprint: string; decision: 'approve' | 'decline'; decider: string; decisionKey: string; isResolved?: (situationKey: string) => boolean }): DecideResult {
+  decide(d: { proposalId: string; fingerprint: string; decision: ProposalDecision; decider: string; decisionKey: string; isResolved?: (situationKey: string) => boolean }): DecideResult {
     const p = this.items.get(d.proposalId);
     if (!p) return { ok: false, code: 'NOT_FOUND', reason: 'no such proposal' };
     if (p.decisionKey === d.decisionKey) return { ok: true, proposal: p, replay: true };
-    if (p.state !== 'pending') return { ok: false, code: 'ALREADY_DECIDED', reason: `proposal is ${p.state}` };
+    if (p.state !== ProposalState.Pending) return { ok: false, code: 'ALREADY_DECIDED', reason: `proposal is ${p.state}` };
     if (p.fingerprint !== d.fingerprint) return { ok: false, code: 'FINGERPRINT_MISMATCH', reason: 'the proposal changed; review it again' };
     if (p.approver !== d.decider) return { ok: false, code: 'NOT_APPROVER', reason: `only ${p.approver} may decide` };
     if (this.now() > p.expiresAt) {
-      p.state = 'expired';
+      p.state = ProposalState.Expired;
       return { ok: false, code: 'EXPIRED', reason: 'proposal expired' };
     }
-    if (d.decision === 'approve' && p.situationKey && d.isResolved?.(p.situationKey)) {
-      p.state = 'stale';
+    if (d.decision === ProposalDecision.Approve && p.situationKey && d.isResolved?.(p.situationKey)) {
+      p.state = ProposalState.Stale;
       return { ok: false, code: 'STALE', reason: 'the triggering situation resolved before approval' };
     }
-    p.state = d.decision === 'approve' ? 'approved' : 'declined';
+    p.state = d.decision === ProposalDecision.Approve ? ProposalState.Approved : ProposalState.Declined;
     p.decisionKey = d.decisionKey;
     return { ok: true, proposal: p, replay: false };
   }
 
   pending(): Proposal[] {
-    return [...this.items.values()].filter((p) => p.state === 'pending');
+    return [...this.items.values()].filter((p) => p.state === ProposalState.Pending);
   }
 
   get(id: string): Proposal | undefined {

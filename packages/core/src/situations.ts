@@ -1,7 +1,6 @@
-import { deterministicId, getPath, sha256, type EventEnvelope, type SchemaRegistry, type SituationMeta } from '@agentevents/contract';
+import { deterministicId, getPath, sha256, type EventEnvelope, type SchemaRegistry, type SituationMeta, Severity, Transition } from '@agentevents/contract';
 
-type Severity = SituationMeta['severity'];
-const SEVERITY_ORDER: readonly Severity[] = ['info', 'low', 'medium', 'high', 'critical'];
+const SEVERITY_ORDER: readonly Severity[] = [Severity.Info, Severity.Low, Severity.Medium, Severity.High, Severity.Critical];
 
 export interface SituationConfig {
   inputType: string;
@@ -117,13 +116,13 @@ export class SituationEngine {
     s.revision += 1;
     if (s.flapping) return [this.emit(ev, situationkey, s, 'update')];
     s.open = false;
-    out.push(this.emit(ev, situationkey, s, 'resolve'));
+    out.push(this.emit(ev, situationkey, s, Transition.Resolve));
     if (this.stormState.open) {
       this.stormState.members.delete(situationkey);
       if (this.stormState.members.size === 0 && this.cfg.storm) {
         this.stormState.open = false;
         this.stormState.revision += 1;
-        out.push(this.stormEmit(ev, 'resolve', 0));
+        out.push(this.stormEmit(ev, Transition.Resolve, 0));
       }
     }
     return out;
@@ -159,7 +158,7 @@ export class SituationEngine {
     return this.stormEmit(ev, 'open', this.opens.length);
   }
 
-  private stormEmit(ev: EventEnvelope, transition: 'open' | 'resolve', opened: number): EventEnvelope {
+  private stormEmit(ev: EventEnvelope, transition: typeof Transition.Open | typeof Transition.Resolve, opened: number): EventEnvelope {
     const st = this.cfg.storm!;
     const key = `sha256:${sha256(`${ev.tenantid ?? ''}\u0000${st.stormType}`)}`;
     const def = this.registry.get(st.stormType);
@@ -182,7 +181,7 @@ export class SituationEngine {
         situationkey: key,
         transition,
         revision: this.stormState.revision,
-        severity: 'high',
+        severity: Severity.High,
         occurrences: { count: this.stormState.members.size, firstSeenAt: ev.time, lastSeenAt: ev.time },
         evidence: { first: [], last: [] },
         flags: [],
@@ -197,7 +196,7 @@ export class SituationEngine {
     s.lastId = id;
     const flags: SituationMeta['flags'] = [];
     if (s.flapping) flags.push('flapping');
-    if (s.storm && transition !== 'resolve') flags.push('storm');
+    if (s.storm && transition !== Transition.Resolve) flags.push('storm');
     return {
       specversion: '1.0',
       id,

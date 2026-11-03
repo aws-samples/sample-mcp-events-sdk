@@ -1,31 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { Ajv } from 'ajv';
-import {
-  EXT,
-  HeartbeatNotification,
-  ListResult,
-  METHODS,
-  OccurrenceNotification,
-  PollResult,
-  SchemaRegistry,
-  StreamResult,
-  SubscribeResult,
-  WEBHOOK_METHODS,
-  webhooks,
-  fromOccurrence,
-  getPath,
-  escapeJsonForPrompt,
-  maskForRender,
-  newNonce,
-  renderEvent,
-  renderPreamble,
-  type ActivationHints,
-  type EventEnvelope,
-  type EventTypeDef,
-  type FilterSpec,
-  type JsonSchema,
-  type Occurrence,
-} from '@agentevents/contract';
+import { EXT, HeartbeatNotification, ListResult, METHODS, OccurrenceNotification, PollResult, SchemaRegistry, StreamResult, SubscribeResult, WEBHOOK_METHODS, webhooks, fromOccurrence, getPath, escapeJsonForPrompt, maskForRender, newNonce, renderEvent, renderPreamble, type ActivationHints, type EventEnvelope, type EventTypeDef, type FilterSpec, type JsonSchema, type Occurrence, Autonomy, DeliveryMode, DeliveryStatus, Transition, Verdict, MidTurn } from '@agentevents/contract';
 import {
   AUTONOMY_ORDER,
   MemoryDecisionStore,
@@ -41,7 +16,6 @@ import {
   ruleGate,
   semanticDedupGate,
   systemClock,
-  type Autonomy,
   type Clock,
   type Decision,
   type DecisionStore,
@@ -53,7 +27,7 @@ import {
   type ThreadMemory,
   type TraceCode,
 } from '@agentevents/core';
-import { ProposalStore, UNATTENDED_TIERS, idempotencyKey, tierOf, type Proposal, type Tier } from '@agentevents/actions';
+import { ProposalStore, UNATTENDED_TIERS, idempotencyKey, tierOf, type Proposal, ProposalDecision, Tier } from '@agentevents/actions';
 import type { Model, ToolCallOutcome, ToolSpec } from './model';
 import { heuristicScreener, type Screener } from './screener';
 import type { HostWebhookEndpoint } from './webhook-endpoint';
@@ -103,16 +77,35 @@ export interface AskResult {
   reason?: string;
 }
 
+type ValueOf<T> = T[keyof T];
+
+/** Why a human is being told something (spec E3 §4.9). */
+export const NotificationKind = {
+  Opened: 'opened',
+  SeverityUp: 'severity_up',
+  Resolved: 'resolved',
+  Suspended: 'suspended',
+  Budget: 'budget',
+  NotStarted: 'not_started',
+  Proposal: 'proposal',
+  Digest: 'digest',
+} as const;
+export type NotificationKind = ValueOf<typeof NotificationKind>;
+
+/** How a woken turn ended (spec E3 §4.7). */
+export const TurnStatus = { Ok: 'ok', Failed: 'failed', TimedOut: 'timed_out', Refused: 'refused' } as const;
+export type TurnStatus = ValueOf<typeof TurnStatus>;
+
 export interface Subscription {
   names: string[];
-  mode: 'stream' | 'poll' | 'webhook';
+  mode: DeliveryMode;
   filter?: FilterSpec;
   /** Required for `webhook` mode. */
   webhook?: { endpoint: HostWebhookEndpoint; ttlMs?: number };
 }
 
 export interface HumanNotification {
-  kind: 'opened' | 'severity_up' | 'resolved' | 'suspended' | 'budget' | 'not_started' | 'proposal' | 'digest';
+  kind: NotificationKind;
   subject: string | undefined;
   text: string;
 }
@@ -125,7 +118,7 @@ export interface TurnRecord {
   downgrades: Decision['downgrades'];
   tainted: boolean;
   withheld: string[];
-  status: 'ok' | 'failed' | 'timed_out' | 'refused';
+  status: TurnStatus;
   result?: Record<string, unknown>;
   failure?: string;
   toolCalls: { name: string; isError: boolean; error?: string }[];
@@ -183,7 +176,7 @@ export const DEFAULT_RESULT_SCHEMA: JsonSchema = {
 };
 
 const RESULT_BLOCK = /```result\s*\n([\s\S]*?)\n```/u;
-const maxAutonomy = (xs: Autonomy[]): Autonomy => xs.reduce((a, b) => (AUTONOMY_ORDER.indexOf(b) > AUTONOMY_ORDER.indexOf(a) ? b : a), 'notify');
+const maxAutonomy = (xs: Autonomy[]): Autonomy => xs.reduce((a, b) => (AUTONOMY_ORDER.indexOf(b) > AUTONOMY_ORDER.indexOf(a) ? b : a), Autonomy.Notify);
 
 function collectStrings(v: unknown, out: Set<string>): void {
   if (typeof v === 'string') {
@@ -245,8 +238,8 @@ export class EventHost {
       ...(opts.extraGates ?? []),
     ];
     this.pipeline = new GatePipeline(safety, () => [ruleGate(opts.rules)], {
-      defaultVerdict: 'store',
-      defaultAutonomy: opts.defaultAutonomy ?? 'investigate',
+      defaultVerdict: Verdict.Store,
+      defaultAutonomy: opts.defaultAutonomy ?? Autonomy.Investigate,
     });
   }
 
@@ -278,12 +271,12 @@ export class EventHost {
         name: t.name,
         description: t.description ?? '',
         inputSchema: t.inputSchema as Record<string, unknown>,
-        tier: tierOf(meta) ?? (t.annotations?.readOnlyHint ? 'safe' : 'irreversible'),
+        tier: tierOf(meta) ?? (t.annotations?.readOnlyHint ? Tier.Safe : Tier.Irreversible),
         ...(targetArg ? { targetArg } : {}),
       });
     }
     const filterMeta = sub.filter ? { _meta: { [EXT.contract]: { filter: sub.filter } } } : {};
-    if (sub.mode === 'stream') {
+    if (sub.mode === DeliveryMode.Stream) {
       client.setNotificationHandler(OccurrenceNotification, (n) => {
         conn.cursor = n.params.cursor;
         this.submit(n.params.event, conn);
@@ -297,7 +290,7 @@ export class EventHost {
           timeout: 2_147_483_647,
         })
         .catch(() => undefined);
-    } else if (sub.mode === 'webhook') {
+    } else if (sub.mode === DeliveryMode.Webhook) {
       await this.subscribeWebhook(conn, filterMeta);
     } else {
       const loop = async (): Promise<void> => {
@@ -327,7 +320,7 @@ export class EventHost {
       },
       SubscribeResult,
     );
-    if (res.deliveryStatus !== 'active') {
+    if (res.deliveryStatus !== DeliveryStatus.Active) {
       ep.unregister(token);
       throw new Error(`webhook subscription ${res.deliveryStatus}: ${res.lastError?.category ?? 'unknown'}`);
     }
@@ -395,8 +388,8 @@ export class EventHost {
       eventId: event.id,
       type: event.type,
       subject: event.subject,
-      verdict: 'store',
-      autonomy: 'notify',
+      verdict: Verdict.Store,
+      autonomy: Autonomy.Notify,
       downgrades: [],
       code,
       reason,
@@ -421,8 +414,8 @@ export class EventHost {
       return this.record(event, v.code === 'SCHEMA_INVALID' ? 'REFUSED_SCHEMA' : 'REFUSED_UNKNOWN_TYPE', v.reason);
     }
     const s = event.situation;
-    if (s?.transition === 'resolve') this.resolved.add(s.situationkey);
-    if (s?.transition === 'open') this.resolved.delete(s.situationkey);
+    if (s?.transition === Transition.Resolve) this.resolved.add(s.situationkey);
+    if (s?.transition === Transition.Open) this.resolved.delete(s.situationkey);
 
     const decision = await this.pipeline.decide({ event, def: this.registry.get(event.type), clock: this.clock, state: this.state });
     await this.decisions.put(decision);
@@ -431,17 +424,17 @@ export class EventHost {
 
     // Coalescing: a storm roll-up absorbs member opens still waiting in their coalescing window.
     const memberType = event.data['memberType'];
-    if (s?.transition === 'open' && typeof memberType === 'string' && (decision.verdict === 'wake' || decision.verdict === 'escalate')) {
+    if (s?.transition === Transition.Open && typeof memberType === 'string' && (decision.verdict === Verdict.Wake || decision.verdict === Verdict.Escalate)) {
       for (const t of this.threads.values()) {
-        const keep = t.pending.filter((i) => !(i.event.type === memberType && i.event.situation?.transition === 'open'));
+        const keep = t.pending.filter((i) => !(i.event.type === memberType && i.event.situation?.transition === Transition.Open));
         for (const i of t.pending) if (!keep.includes(i)) await this.record(i.event, 'COALESCED', `absorbed into storm ${event.id}`);
         t.pending = keep;
       }
     }
 
-    if (decision.verdict === 'digest') this.digest.push(event);
-    if (decision.verdict === 'escalate') this.reviewQueue.push(event);
-    if (decision.verdict === 'wake' || decision.verdict === 'escalate') this.enqueue({ event, decision, conn });
+    if (decision.verdict === Verdict.Digest) this.digest.push(event);
+    if (decision.verdict === Verdict.Escalate) this.reviewQueue.push(event);
+    if (decision.verdict === Verdict.Wake || decision.verdict === Verdict.Escalate) this.enqueue({ event, decision, conn });
   }
 
   /** Spec E3 §4.9: human notifications are separate from model activation, and only on change. */
@@ -450,14 +443,14 @@ export class EventHost {
     if (!s || !this.opts.onNotify) return;
     const title = String(getPath(ev, 'data.alarm') ?? ev.subject ?? ev.type);
     const prev = this.severity.get(s.situationkey);
-    if (s.transition === 'open') {
+    if (s.transition === Transition.Open) {
       this.severity.set(s.situationkey, s.severity);
-      if (!s.flags.includes('storm')) this.opts.onNotify({ kind: 'opened', subject: ev.subject, text: `${title} opened (${s.severity}); ${d.verdict}: ${d.reason}` });
-    } else if (s.transition === 'resolve') {
-      this.opts.onNotify({ kind: 'resolved', subject: ev.subject, text: `${title} resolved${ev.actor?.kind === 'platform' ? ' (by our action)' : ''}` });
+      if (!s.flags.includes('storm')) this.opts.onNotify({ kind: NotificationKind.Opened, subject: ev.subject, text: `${title} opened (${s.severity}); ${d.verdict}: ${d.reason}` });
+    } else if (s.transition === Transition.Resolve) {
+      this.opts.onNotify({ kind: NotificationKind.Resolved, subject: ev.subject, text: `${title} resolved${ev.actor?.kind === 'platform' ? ' (by our action)' : ''}` });
     } else if (prev && s.severity !== prev) {
       this.severity.set(s.situationkey, s.severity);
-      this.opts.onNotify({ kind: 'severity_up', subject: ev.subject, text: `${title} severity ${prev} → ${s.severity}` });
+      this.opts.onNotify({ kind: NotificationKind.SeverityUp, subject: ev.subject, text: `${title} severity ${prev} → ${s.severity}` });
     }
   }
 
@@ -476,14 +469,14 @@ export class EventHost {
     const t = this.thread(item.event.subject);
     const hints = this.registry.get(item.event.type)?.hints;
     if (t.running) {
-      switch (hints?.midTurn ?? 'queue') {
-        case 'reject':
+      switch (hints?.midTurn ?? MidTurn.Queue) {
+        case MidTurn.Reject:
           void this.record(item.event, 'REJECTED_MID_TURN', 'turn in progress');
           return;
-        case 'merge':
+        case MidTurn.Merge:
           t.inbox.push(item);
           return;
-        case 'interrupt':
+        case MidTurn.Interrupt:
           t.abort?.abort();
           t.pending.push(item);
           return;
@@ -527,8 +520,8 @@ export class EventHost {
 
     let autonomy = maxAutonomy(items.map((i) => i.decision.autonomy));
     const downgrades = items.flatMap((i) => i.decision.downgrades);
-    if (autonomy === 'notify') {
-      return notify('not_started', `agent not started (autonomy notify): ${downgrades.map((d) => d.reason).join('; ') || 'rule autonomy is notify'}`);
+    if (autonomy === Autonomy.Notify) {
+      return notify(NotificationKind.NotStarted, `agent not started (autonomy notify): ${downgrades.map((d) => d.reason).join('; ') || 'rule autonomy is notify'}`);
     }
 
     // Redact by sensitivity, screen untrusted fields, render as data.
@@ -558,9 +551,9 @@ export class EventHost {
       shown.push({ event: masked, withheld: local });
     }
     const tainted = withheld.length > 0;
-    if (tainted && autonomy === 'act') {
-      downgrades.push({ from: 'act', to: 'propose', reason: 'untrusted content was withheld this turn (tainted)' });
-      autonomy = 'propose';
+    if (tainted && autonomy === Autonomy.Act) {
+      downgrades.push({ from: Autonomy.Act, to: Autonomy.Propose, reason: 'untrusted content was withheld this turn (tainted)' });
+      autonomy = Autonomy.Propose;
     }
 
     const primary = items.at(-1)!.event;
@@ -587,7 +580,7 @@ export class EventHost {
       downgrades,
       tainted,
       withheld,
-      status: 'ok',
+      status: TurnStatus.Ok,
       toolCalls: [],
       proposals: [],
       actions: [],
@@ -625,21 +618,21 @@ export class EventHost {
         signal: t.abort.signal,
       });
       if (res.stopReason === 'aborted') {
-        record.status = 'timed_out';
+        record.status = TurnStatus.TimedOut;
         record.failure = 'turn aborted (deadline or interrupt)';
       } else if (res.stopReason === 'refusal') {
-        record.status = 'refused';
+        record.status = TurnStatus.Refused;
         record.failure = 'model refused';
       } else {
         const parsed = this.parseResult(res.text, resultSchema);
         if (parsed.ok) record.result = parsed.value;
         else {
-          record.status = 'failed';
+          record.status = TurnStatus.Failed;
           record.failure = parsed.reason;
         }
       }
     } catch (e) {
-      record.status = 'failed';
+      record.status = TurnStatus.Failed;
       record.failure = (e as Error).message;
     } finally {
       clearTimeout(timer);
@@ -689,7 +682,7 @@ export class EventHost {
       const history = await this.threadMemory.recent(t.id, this.opts.contextEntries ?? 40);
       const tainted = history.some((e) => (e.withheld?.length ?? 0) > 0);
       const lastEvent = [...history].reverse().find((e) => e.kind === 'event')?.event;
-      const tools = this.toolsFor('propose');
+      const tools = this.toolsFor(Autonomy.Propose);
       const prompt = [
         renderPreamble(nonce),
         this.renderHistory(history, nonce),
@@ -699,7 +692,7 @@ export class EventHost {
         .filter(Boolean)
         .join('\n\n');
       const record: TurnRecord = {
-        threadId: t.id, subject, eventIds: [], autonomy: 'propose', downgrades: [], tainted, withheld: [], status: 'ok',
+        threadId: t.id, subject, eventIds: [], autonomy: Autonomy.Propose, downgrades: [], tainted, withheld: [], status: TurnStatus.Ok,
         toolCalls: [], proposals: [], actions: [], modelId: this.opts.model.id, prompt, startedAt: iso(this.clock.now()), endedAt: '',
       };
       const clean = new Set<string>();
@@ -711,7 +704,7 @@ export class EventHost {
         prompt,
         tools,
         callTool: async (name, args) => {
-          const out = await this.callToolForTurn(name, args, { autonomy: 'propose', tainted, clean, primary, tenant: this.opts.owner.tenantid ?? '', conn, record });
+          const out = await this.callToolForTurn(name, args, { autonomy: Autonomy.Propose, tainted, clean, primary, tenant: this.opts.owner.tenantid ?? '', conn, record });
           record.toolCalls.push({ name, isError: out.isError, ...(out.isError ? { error: out.content.slice(0, 200) } : {}) });
           return out;
         },
@@ -734,13 +727,13 @@ export class EventHost {
     let proposable = false;
     for (const t of this.tools.values()) {
       if (prefixes.some((p) => t.name.startsWith(p)) || t.name === 'get_new_events') continue;
-      if (t.tier === 'safe') out.push({ name: t.name, description: t.description, inputSchema: t.inputSchema });
-      else if (autonomy === 'act' && UNATTENDED_TIERS.has(t.tier) && (this.opts.unattendedAllowlist ?? []).includes(t.name)) {
+      if (t.tier === Tier.Safe) out.push({ name: t.name, description: t.description, inputSchema: t.inputSchema });
+      else if (autonomy === Autonomy.Act && UNATTENDED_TIERS.has(t.tier) && (this.opts.unattendedAllowlist ?? []).includes(t.name)) {
         out.push({ name: t.name, description: `${t.description} [${t.tier}; runs unattended]`, inputSchema: t.inputSchema });
-      } else if ((autonomy === 'propose' || autonomy === 'act') && t.tier !== 'irreversible') proposable = true;
+      } else if ((autonomy === Autonomy.Propose || autonomy === Autonomy.Act) && t.tier !== Tier.Irreversible) proposable = true;
     }
     if (proposable) {
-      const names = [...this.tools.values()].filter((t) => t.tier === 'reversible' || t.tier === 'effort_to_reverse').map((t) => t.name);
+      const names = [...this.tools.values()].filter((t) => t.tier === Tier.Reversible || t.tier === Tier.EffortToReverse).map((t) => t.name);
       out.push({
         name: 'propose_action',
         description: `Propose a side-effecting action for human approval. Allowed tools: ${names.join(', ')}. The target must be an identifier returned by a read tool in this turn.`,
@@ -756,9 +749,9 @@ export class EventHost {
 
   private instructions(autonomy: Autonomy, schema: JsonSchema): string {
     const can =
-      autonomy === 'investigate'
+      autonomy === Autonomy.Investigate
         ? 'You may only investigate with read-only tools.'
-        : autonomy === 'propose'
+        : autonomy === Autonomy.Propose
           ? 'You may investigate, and propose actions with propose_action. Proposals need human approval.'
           : 'You may investigate, run the listed unattended tools, and propose anything else with propose_action.';
     return `${can}\nFinish with a fenced block:\n\`\`\`result\n<JSON matching ${JSON.stringify(schema)}>\n\`\`\``;
@@ -788,7 +781,7 @@ export class EventHost {
     const allowed = this.toolsFor(ctx.autonomy).some((t) => t.name === name);
     if (!tool || !allowed) return { content: `tool ${name} is not available in this session`, isError: true };
 
-    if (tool.tier === 'safe') {
+    if (tool.tier === Tier.Safe) {
       const res = await tool.conn.client.callTool({ name, arguments: args });
       const outcome = toOutcome(res);
       if (!outcome.isError) collectStrings(res.structuredContent ?? outcome.content, ctx.clean);
@@ -807,7 +800,7 @@ export class EventHost {
     ctx: { tainted: boolean; clean: Set<string>; primary: EventEnvelope; tenant: string; record: TurnRecord },
   ): ToolCallOutcome {
     const tool = this.tools.get(String(args['tool'] ?? ''));
-    if (!tool || (tool.tier !== 'reversible' && tool.tier !== 'effort_to_reverse')) {
+    if (!tool || (tool.tier !== Tier.Reversible && tool.tier !== Tier.EffortToReverse)) {
       return { content: `refused: ${String(args['tool'])} cannot be proposed`, isError: true };
     }
     const params = (args['arguments'] ?? {}) as Record<string, unknown>;
@@ -829,7 +822,7 @@ export class EventHost {
     });
     ctx.record.proposals.push(p.proposalId);
     this.opts.onProposal?.(p);
-    this.opts.onNotify?.({ kind: 'proposal', subject: ctx.primary.subject, text: `approval needed: ${tool.name}(${target}) — ${p.reason}${p.tainted ? ' [tainted turn: explicit approval required]' : ''}` });
+    this.opts.onNotify?.({ kind: NotificationKind.Proposal, subject: ctx.primary.subject, text: `approval needed: ${tool.name}(${target}) — ${p.reason}${p.tainted ? ' [tainted turn: explicit approval required]' : ''}` });
     return { content: JSON.stringify({ proposalId: p.proposalId, state: 'pending_approval', expiresAt: iso(p.expiresAt) }), isError: false };
   }
 
@@ -851,7 +844,7 @@ export class EventHost {
   }
 
   /** Spec E4 §5.3: the bound approver decides; stale if the situation resolved; executes once. */
-  async decide(proposalId: string, fingerprint: string, decision: 'approve' | 'decline', decider: string): Promise<{ ok: boolean; code?: string; reason?: string; output?: string }> {
+  async decide(proposalId: string, fingerprint: string, decision: ProposalDecision, decider: string): Promise<{ ok: boolean; code?: string; reason?: string; output?: string }> {
     const r = this.proposals.decide({
       proposalId,
       fingerprint,
@@ -861,7 +854,7 @@ export class EventHost {
       isResolved: (k) => this.resolved.has(k),
     });
     if (!r.ok) return { ok: false, code: r.code, reason: r.reason };
-    if (decision === 'decline' || r.replay) return { ok: true };
+    if (decision === ProposalDecision.Decline || r.replay) return { ok: true };
     const tool = this.tools.get(r.proposal.tool);
     if (!tool) return { ok: false, code: 'NOT_FOUND', reason: 'tool disappeared' };
     const out = await this.execute(tool, r.proposal.params, r.proposal.target, undefined, this.opts.owner.tenantid ?? '', undefined, `approval:${proposalId}`, r.proposal.trigger?.correlationId);

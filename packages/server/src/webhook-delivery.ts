@@ -3,7 +3,7 @@ import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { LookupFunction } from 'node:net';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import { toOccurrence, webhooks, type EventEnvelope, type FilterSpec, type LastError, type SubscribeResult, type WebhookBody } from '@agentevents/contract';
+import { toOccurrence, webhooks, type EventEnvelope, type FilterSpec, type LastError, type SubscribeResult, type WebhookBody, DeliveryStatus } from '@agentevents/contract';
 import { decodeCursor, encodeCursor, iso, systemClock, type Clock, type EventLog } from '@agentevents/core';
 import { checkUrlShape, resolveForDelivery, type UrlPolicyOptions } from './url-policy';
 
@@ -31,7 +31,7 @@ interface Sub {
   ttlMs: number;
   expiresAt: number;
   last: number;
-  status: 'active' | 'failing' | 'failed' | 'expired';
+  status: DeliveryStatus;
   lastError?: LastError;
   pumping: boolean;
 }
@@ -87,8 +87,8 @@ export class WebhookDelivery {
       }
       s.ttlMs = ttl;
       s.expiresAt = now + ttl;
-      if (s.status !== 'active') {
-        s.status = 'active';
+      if (s.status !== DeliveryStatus.Active) {
+        s.status = DeliveryStatus.Active;
         delete s.lastError;
       }
       void this.pump(s);
@@ -119,7 +119,7 @@ export class WebhookDelivery {
       ttlMs: ttl,
       expiresAt: now + ttl,
       last,
-      status: 'active',
+      status: DeliveryStatus.Active,
       pumping: false,
     };
 
@@ -135,7 +135,7 @@ export class WebhookDelivery {
       }
       if (echoed !== challenge) {
         // Failures surface only as a category, never the endpoint's raw response.
-        return { subscriptionId: s.id, ttlMs: 0, refreshBefore: iso(now), deliveryStatus: 'failed', lastError: { category: res.ok ? 'challenge_failed' : res.category, at: iso(now) }, cursor: encodeCursor(last) };
+        return { subscriptionId: s.id, ttlMs: 0, refreshBefore: iso(now), deliveryStatus: DeliveryStatus.Failed, lastError: { category: res.ok ? 'challenge_failed' : res.category, at: iso(now) }, cursor: encodeCursor(last) };
       }
       this.verified.add(key);
     }
@@ -147,7 +147,7 @@ export class WebhookDelivery {
   unsubscribe(id: string, tenant: string | undefined): void {
     const s = this.subs.get(id);
     if (!s || s.tenant !== tenant) throw new McpError(ErrorCode.InvalidParams, 'unknown subscription');
-    s.status = 'expired';
+    s.status = DeliveryStatus.Expired;
     this.subs.delete(id);
   }
 
@@ -177,9 +177,9 @@ export class WebhookDelivery {
     s.pumping = true;
     try {
       for (;;) {
-        if (s.status !== 'active') return;
+        if (s.status !== DeliveryStatus.Active) return;
         if (this.clock.now() >= s.expiresAt) {
-          s.status = 'expired';
+          s.status = DeliveryStatus.Expired;
           s.lastError = { category: 'expired', at: iso(this.clock.now()) };
           return;
         }
@@ -207,7 +207,7 @@ export class WebhookDelivery {
     for (let attempt = 1; attempt <= max; attempt++) {
       const r = await this.post(s, body, msgId);
       if (r.ok) {
-        if (s.status === 'failing') s.status = 'active';
+        if (s.status === DeliveryStatus.Failing) s.status = DeliveryStatus.Active;
         return true;
       }
       category = r.category;

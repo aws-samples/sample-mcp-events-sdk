@@ -1,11 +1,14 @@
-import type { EventEnvelope, EventTypeDef } from '@agentevents/contract';
+import { Autonomy, type EventEnvelope, type EventTypeDef, Verdict } from '@agentevents/contract';
 import type { Clock, RuntimeState } from './ports';
 import type { TraceCode } from './trace';
 
-/** Spec E3 §4.3: two independent axes. */
-export type Verdict = 'drop' | 'store' | 'digest' | 'wake' | 'decide' | 'escalate';
-export type Autonomy = 'notify' | 'investigate' | 'propose' | 'act';
-export const AUTONOMY_ORDER: readonly Autonomy[] = ['notify', 'investigate', 'propose', 'act'];
+/** Spec E3 §4.3: two independent axes. Re-exported so hosts can import them from core. */
+export { Autonomy, Verdict };
+export const AUTONOMY_ORDER: readonly Autonomy[] = [Autonomy.Notify, Autonomy.Investigate, Autonomy.Propose, Autonomy.Act];
+
+/** Where a gate runs in the pipeline. Safety gates always run first. */
+export const GateStage = { Safety: 'safety', Rule: 'rule', Classifier: 'classifier' } as const;
+export type GateStage = (typeof GateStage)[keyof typeof GateStage];
 
 export const minAutonomy = (a: Autonomy, b: Autonomy): Autonomy =>
   AUTONOMY_ORDER.indexOf(a) <= AUTONOMY_ORDER.indexOf(b) ? a : b;
@@ -32,7 +35,7 @@ export interface GateOutcome {
 export interface Gate {
   id: string;
   version: string;
-  stage: 'safety' | 'rule' | 'classifier';
+  stage: GateStage;
   evaluate(ctx: GateContext): Promise<GateOutcome | undefined> | GateOutcome | undefined;
 }
 
@@ -59,7 +62,7 @@ export interface Decision {
 
 export interface PipelineOptions {
   /** Used when no gate decides. `hint` = the server's suggested verdict (the host still decides). */
-  defaultVerdict: 'store' | 'hint';
+  defaultVerdict: typeof Verdict.Store | 'hint';
   defaultAutonomy: Autonomy;
 }
 
