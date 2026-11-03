@@ -1,0 +1,36 @@
+{
+  "name": "sample-mcp-events-sdk",
+  "type": "module",
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "demo": "tsx examples/cloudops-demo/src/run-demo.ts",
+    "demo:claude": "AGENTEVENTS_MODEL=claude tsx examples/cloudops-demo/src/run-demo.ts",
+    "verify": "pnpm typecheck && pnpm test",
+    "demo:research": "tsx examples/research-demo/src/run-demo.ts",
+    "demo:bedrock": "AGENTEVENTS_MODEL=bedrock tsx examples/cloudops-demo/src/run-demo.ts"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "dynalite": "4.0.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
+  },
+  "dependencies": {
+    "@anthropic-ai/bedrock-sdk": "1.1.0",
+    "@anthropic-ai/sdk": "1.3.0",
+    "@aws-sdk/client-dynamodb": "3.1161.0",
+    "@aws-sdk/lib-dynamodb": "3.1161.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "jsonata": "2.2.2",
+    "zod": "4.6.7"
+  },
+  "private": true,
+  "license": "MIT-0"
+}

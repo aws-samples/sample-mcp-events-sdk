@@ -1,0 +1,6 @@
+packages:
+  - "packages/*"
+  - "examples/*"
+allowBuilds:
+  classic-level: true
+  esbuild: true
